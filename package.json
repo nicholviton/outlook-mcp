@@ -23,6 +23,7 @@
     "@azure/identity": "^4.10.2",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "@modelcontextprotocol/sdk": "^1.15.0",
+    "dotenv": "^17.1.0",
     "keytar": "^7.9.0",
     "node-persist": "^4.0.4"
   },

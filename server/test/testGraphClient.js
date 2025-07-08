@@ -10,8 +10,7 @@ async function testGraphApiClient() {
     // Initialize auth manager
     const authManager = new OutlookAuthManager(
       process.env.AZURE_CLIENT_ID,
-      process.env.AZURE_TENANT_ID,
-      process.env.AZURE_CLIENT_SECRET
+      process.env.AZURE_TENANT_ID
     );
 
     console.log('1. Testing authentication...');
@@ -130,6 +129,7 @@ async function testGraphApiClient() {
 if (import.meta.url === `file://${process.argv[1]}`) {
   if (!process.env.AZURE_CLIENT_ID || !process.env.AZURE_TENANT_ID) {
     console.error('Error: Please set AZURE_CLIENT_ID and AZURE_TENANT_ID environment variables');
+    console.error('Note: This test uses OAuth 2.0 with PKCE for secure delegated authentication.');
     process.exit(1);
   }
   

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
+import 'dotenv/config';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { OutlookAuthManager } from './auth/auth.js';
 import { 
   authenticateTool,
@@ -49,11 +51,10 @@ const server = new Server(
 
 const authManager = new OutlookAuthManager(
   process.env.AZURE_CLIENT_ID,
-  process.env.AZURE_TENANT_ID,
-  process.env.AZURE_CLIENT_SECRET
+  process.env.AZURE_TENANT_ID
 );
 
-server.setRequestHandler('tools/list', async () => {
+server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
@@ -121,6 +122,11 @@ server.setRequestHandler('tools/list', async () => {
               type: 'array',
               items: { type: 'string' },
               description: 'BCC recipients',
+            },
+            preserveUserStyling: {
+              type: 'boolean',
+              description: 'Apply user\'s default Outlook styling, font preferences, and signature',
+              default: true,
             },
           },
           required: ['to', 'subject', 'body'],
@@ -728,7 +734,7 @@ server.setRequestHandler('tools/list', async () => {
   };
 });
 
-server.setRequestHandler('tools/call', async (request) => {
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
@@ -831,7 +837,7 @@ async function main() {
   if (!process.env.AZURE_CLIENT_ID || !process.env.AZURE_TENANT_ID) {
     console.error('Error: AZURE_CLIENT_ID and AZURE_TENANT_ID environment variables are required.');
     console.error('Please set these in your MCP server configuration.');
-    console.error('Note: AZURE_CLIENT_SECRET is optional but recommended for server applications.');
+    console.error('Note: This server uses OAuth 2.0 with PKCE for secure delegated authentication.');
     process.exit(1);
   }
 

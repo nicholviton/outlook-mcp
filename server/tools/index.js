@@ -1,3 +1,75 @@
+// Cache for user styling information to avoid repeated API calls
+const stylingCache = new Map();
+const signatureCache = new Map();
+const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes in milliseconds
+const SIGNATURE_CACHE_DURATION = 60 * 60 * 1000; // 1 hour for signatures (they change less frequently)
+
+// Function to clear styling cache for a specific user or all users
+export function clearStylingCache(userId = null) {
+  if (userId) {
+    const cacheKey = `styling_${userId}`;
+    stylingCache.delete(cacheKey);
+    console.log(`Cleared styling cache for user ${userId}`);
+  } else {
+    stylingCache.clear();
+    console.log('Cleared all styling cache');
+  }
+}
+
+// Function to clear signature cache for a specific user or all users
+export function clearSignatureCache(userId = null) {
+  if (userId) {
+    const cacheKey = `signature_${userId}`;
+    signatureCache.delete(cacheKey);
+    console.log(`Cleared signature cache for user ${userId}`);
+  } else {
+    signatureCache.clear();
+    console.log('Cleared all signature cache');
+  }
+}
+
+// Function to get cache statistics
+export function getStylingCacheStats() {
+  const stats = {
+    totalEntries: stylingCache.size,
+    entries: []
+  };
+  
+  for (const [key, value] of stylingCache) {
+    stats.entries.push({
+      key,
+      age: Date.now() - value.timestamp,
+      isExpired: (Date.now() - value.timestamp) > CACHE_DURATION
+    });
+  }
+  
+  return stats;
+}
+
+// Function to clean up expired cache entries
+function cleanupExpiredCache() {
+  const now = Date.now();
+  
+  // Clean up styling cache
+  for (const [key, value] of stylingCache) {
+    if ((now - value.timestamp) > CACHE_DURATION) {
+      stylingCache.delete(key);
+      console.log(`Cleaned up expired styling cache entry: ${key}`);
+    }
+  }
+  
+  // Clean up signature cache
+  for (const [key, value] of signatureCache) {
+    if ((now - value.timestamp) > SIGNATURE_CACHE_DURATION) {
+      signatureCache.delete(key);
+      console.log(`Cleaned up expired signature cache entry: ${key}`);
+    }
+  }
+}
+
+// Run cleanup every 10 minutes
+setInterval(cleanupExpiredCache, 10 * 60 * 1000);
+
 export async function authenticateTool(authManager) {
   const result = await authManager.authenticate();
   
@@ -63,17 +135,27 @@ export async function listEmailsTool(authManager, args) {
 }
 
 export async function sendEmailTool(authManager, args) {
-  const { to, subject, body, bodyType = 'text', cc = [], bcc = [] } = args;
+  const { to, subject, body, bodyType = 'text', cc = [], bcc = [], preserveUserStyling = true } = args;
 
   try {
     await authManager.ensureAuthenticated();
     const graphApiClient = authManager.getGraphApiClient();
 
+    let finalBody = body;
+    let finalBodyType = bodyType;
+
+    // If preserving user styling, get user's default styling and signature
+    if (preserveUserStyling) {
+      const styledBody = await applyUserStyling(graphApiClient, body, bodyType);
+      finalBody = styledBody.content;
+      finalBodyType = styledBody.type;
+    }
+
     const message = {
       subject,
       body: {
-        contentType: bodyType === 'html' ? 'HTML' : 'Text',
-        content: body,
+        contentType: finalBodyType === 'html' ? 'HTML' : 'Text',
+        content: finalBody,
       },
       toRecipients: to.map(email => ({
         emailAddress: { address: email },
@@ -96,6 +178,15 @@ export async function sendEmailTool(authManager, args) {
       message,
       saveToSentItems: true,
     });
+
+    // Invalidate styling cache after sending email (user might have changed styling)
+    // Don't invalidate signature cache as frequently since signatures change less often
+    try {
+      const userInfo = await graphApiClient.makeRequest('/me', { select: 'id' });
+      clearStylingCache(userInfo.id);
+    } catch (error) {
+      console.warn('Could not invalidate styling cache:', error.message);
+    }
 
     return {
       content: [
@@ -2749,4 +2840,446 @@ function formatFileSize(bytes) {
   if (bytes === 0) return '0 Bytes';
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+}
+
+// Helper function to apply user's default styling and signature to email content
+async function applyUserStyling(graphApiClient, content, bodyType) {
+  try {
+    // Try to get user's mail settings (requires MailboxSettings.Read permission)
+    let mailSettings = null;
+    try {
+      mailSettings = await graphApiClient.makeRequest('/me/mailboxSettings');
+      console.log('Retrieved mailbox settings:', JSON.stringify(mailSettings, null, 2));
+    } catch (error) {
+      if (error.message.includes('403') || error.message.includes('ErrorAccessDenied')) {
+        console.warn('MailboxSettings.Read permission not granted, using basic styling');
+        // Use basic styling without accessing mailbox settings
+        return await applyBasicStyling(content, bodyType, graphApiClient);
+      }
+      throw error;
+    }
+
+    // Get user's default signature (if available)
+    let signature = '';
+    try {
+      signature = await getUserSignature(graphApiClient);
+    } catch (error) {
+      console.warn('Could not retrieve signature:', error.message);
+    }
+
+    // Try to get actual styling from recent emails
+    let actualStyling = null;
+    try {
+      actualStyling = await extractUserStylingFromEmails(graphApiClient);
+      console.log('Extracted styling from emails:', actualStyling);
+    } catch (error) {
+      console.warn('Could not extract styling from emails:', error.message);
+    }
+
+    // Convert content to HTML if it's not already
+    let htmlContent = content;
+    if (bodyType === 'text') {
+      // Convert plain text to HTML with basic formatting
+      htmlContent = convertTextToHtml(content);
+    }
+
+    // Apply user's styling preferences
+    const styledContent = await applyOutlookStyling(htmlContent, signature, mailSettings, actualStyling);
+
+    return {
+      content: styledContent,
+      type: 'html'
+    };
+  } catch (error) {
+    console.warn('Could not apply user styling, using original content:', error.message);
+    return {
+      content: content,
+      type: bodyType
+    };
+  }
+}
+
+// Apply basic styling when mailbox settings are not accessible
+async function applyBasicStyling(content, bodyType, graphApiClient) {
+  try {
+    // Get signature from sent emails (this works with existing permissions)
+    const signature = await getUserSignature(graphApiClient);
+
+    // Convert content to HTML if it's not already
+    let htmlContent = content;
+    if (bodyType === 'text') {
+      htmlContent = convertTextToHtml(content);
+    }
+
+    // Apply basic Outlook-like styling without accessing mailbox settings
+    const styledContent = await applyOutlookStyling(htmlContent, signature, null, null);
+
+    return {
+      content: styledContent,
+      type: 'html'
+    };
+  } catch (error) {
+    console.warn('Could not apply basic styling:', error.message);
+    return {
+      content: content,
+      type: bodyType
+    };
+  }
+}
+
+// Extract actual styling from user's recent emails
+async function extractUserStylingFromEmails(graphApiClient) {
+  try {
+    // Get user identifier for cache key
+    const userInfo = await graphApiClient.makeRequest('/me', { select: 'id' });
+    const cacheKey = `styling_${userInfo.id}`;
+    
+    // Check cache first
+    const cachedData = stylingCache.get(cacheKey);
+    if (cachedData && (Date.now() - cachedData.timestamp) < CACHE_DURATION) {
+      console.log('Using cached styling information');
+      return cachedData.styling;
+    }
+    
+    console.log('Fetching fresh styling information from sent emails');
+    
+    // Get recent sent emails to analyze styling patterns
+    const sentItems = await graphApiClient.makeRequest('/me/mailFolders/sentitems/messages', {
+      top: 10,
+      select: 'body',
+      orderby: 'sentDateTime desc'
+    });
+
+    // Analyze HTML content for font styling patterns
+    const stylingPatterns = {
+      fontFamily: new Map(),
+      fontSize: new Map(),
+      fontColor: new Map()
+    };
+
+    for (const message of sentItems.value) {
+      if (message.body?.contentType === 'HTML' && message.body.content) {
+        const extracted = extractStylingFromHtml(message.body.content);
+        console.log('Extracted styling from email:', extracted);
+        if (extracted.fontFamily) {
+          stylingPatterns.fontFamily.set(extracted.fontFamily, 
+            (stylingPatterns.fontFamily.get(extracted.fontFamily) || 0) + 1);
+        }
+        if (extracted.fontSize) {
+          stylingPatterns.fontSize.set(extracted.fontSize, 
+            (stylingPatterns.fontSize.get(extracted.fontSize) || 0) + 1);
+        }
+        if (extracted.fontColor) {
+          stylingPatterns.fontColor.set(extracted.fontColor, 
+            (stylingPatterns.fontColor.get(extracted.fontColor) || 0) + 1);
+        }
+      }
+    }
+
+    // Get most common styling
+    const mostCommonStyling = {
+      fontFamily: getMostCommon(stylingPatterns.fontFamily),
+      fontSize: getMostCommon(stylingPatterns.fontSize),
+      fontColor: getMostCommon(stylingPatterns.fontColor)
+    };
+
+    console.log('Font family patterns found:', Array.from(stylingPatterns.fontFamily.entries()));
+    console.log('Most common styling selected:', mostCommonStyling);
+
+    // Cache the results
+    stylingCache.set(cacheKey, {
+      styling: mostCommonStyling,
+      timestamp: Date.now()
+    });
+
+    return mostCommonStyling;
+  } catch (error) {
+    console.warn('Could not extract styling from emails:', error.message);
+    return null;
+  }
+}
+
+// Extract styling information from HTML content
+function extractStylingFromHtml(htmlContent) {
+  const styling = {};
+  
+  // Look for font-family in style attributes and CSS - try multiple patterns
+  const fontFamilyPatterns = [
+    /font-family:\s*([^;,}]+)/gi,
+    /font-family\s*=\s*["']([^"']+)["']/gi,
+    /<font[^>]*face\s*=\s*["']([^"']+)["']/gi
+  ];
+  
+  for (const pattern of fontFamilyPatterns) {
+    const matches = [...htmlContent.matchAll(pattern)];
+    for (const match of matches) {
+      if (match[1]) {
+        const fontFamily = match[1].replace(/["']/g, '').trim();
+        // Filter out generic fallbacks and prioritize specific fonts
+        if (fontFamily && !fontFamily.includes('sans-serif') && !fontFamily.includes('serif') && !fontFamily.includes('monospace')) {
+          styling.fontFamily = fontFamily;
+          break;
+        }
+      }
+    }
+    if (styling.fontFamily) break;
+  }
+
+  // Look for font-size
+  const fontSizePatterns = [
+    /font-size:\s*([^;,}]+)/gi,
+    /<font[^>]*size\s*=\s*["']([^"']+)["']/gi
+  ];
+  
+  for (const pattern of fontSizePatterns) {
+    const match = htmlContent.match(pattern);
+    if (match) {
+      styling.fontSize = match[1].trim();
+      break;
+    }
+  }
+
+  // Look for color
+  const colorPatterns = [
+    /color:\s*([^;,}]+)/gi,
+    /<font[^>]*color\s*=\s*["']([^"']+)["']/gi
+  ];
+  
+  for (const pattern of colorPatterns) {
+    const match = htmlContent.match(pattern);
+    if (match) {
+      styling.fontColor = match[1].trim();
+      break;
+    }
+  }
+
+  // Also check for body tag attributes
+  const bodyMatch = htmlContent.match(/<body[^>]*style="([^"]*)"[^>]*>/i);
+  if (bodyMatch) {
+    const bodyStyle = bodyMatch[1];
+    if (!styling.fontFamily) {
+      const bodyFontMatch = bodyStyle.match(/font-family:\s*([^;,}]+)/i);
+      if (bodyFontMatch) {
+        const fontFamily = bodyFontMatch[1].replace(/["']/g, '').trim();
+        if (fontFamily && !fontFamily.includes('sans-serif') && !fontFamily.includes('serif')) {
+          styling.fontFamily = fontFamily;
+        }
+      }
+    }
+  }
+
+  return styling;
+}
+
+// Get most common value from a Map
+function getMostCommon(map) {
+  if (map.size === 0) return null;
+  
+  let mostCommon = null;
+  let maxCount = 0;
+  
+  for (const [value, count] of map) {
+    if (count > maxCount) {
+      maxCount = count;
+      mostCommon = value;
+    }
+  }
+  
+  return mostCommon;
+}
+
+// Get user's signature from their mailbox settings
+async function getUserSignature(graphApiClient) {
+  try {
+    // Get user identifier for cache key
+    const userInfo = await graphApiClient.makeRequest('/me', { select: 'id' });
+    const cacheKey = `signature_${userInfo.id}`;
+    
+    // Check cache first
+    const cachedSignature = signatureCache.get(cacheKey);
+    if (cachedSignature && (Date.now() - cachedSignature.timestamp) < SIGNATURE_CACHE_DURATION) {
+      console.log('Using cached signature');
+      return cachedSignature.signature;
+    }
+    
+    console.log('Searching for user signature in sent emails');
+    
+    // Search through more sent emails to find genuine signatures (not MCP-generated)
+    const sentItems = await graphApiClient.makeRequest('/me/mailFolders/sentitems/messages', {
+      top: 50, // Look through more emails
+      select: 'body,subject',
+      orderby: 'sentDateTime desc'
+    });
+
+    let foundSignature = '';
+    
+    // Look for emails that don't appear to be MCP-generated
+    for (const message of sentItems.value) {
+      if (message.body?.contentType === 'HTML' && message.body.content) {
+        // Skip emails that look like they were generated by our MCP tool
+        if (isMcpGeneratedEmail(message.body.content)) {
+          continue;
+        }
+        
+        const signature = extractSignatureFromHtml(message.body.content);
+        if (signature && signature.trim().length > 10) { // Must be substantial
+          foundSignature = signature;
+          console.log('Found genuine signature in email');
+          break;
+        }
+      }
+    }
+    
+    // If no signature found in recent emails, try to get from mailbox settings
+    if (!foundSignature) {
+      try {
+        const mailSettings = await graphApiClient.makeRequest('/me/mailboxSettings');
+        if (mailSettings?.automaticRepliesSettings?.internalReplyMessage) {
+          // Sometimes signature info is in automatic replies
+          const autoReplySignature = extractSignatureFromHtml(mailSettings.automaticRepliesSettings.internalReplyMessage);
+          if (autoReplySignature) {
+            foundSignature = autoReplySignature;
+            console.log('Found signature from mailbox settings');
+          }
+        }
+      } catch (error) {
+        console.warn('Could not access mailbox settings for signature:', error.message);
+      }
+    }
+    
+    // Cache the result (even if empty)
+    signatureCache.set(cacheKey, {
+      signature: foundSignature,
+      timestamp: Date.now()
+    });
+    
+    return foundSignature;
+  } catch (error) {
+    console.warn('Could not retrieve user signature:', error.message);
+    return '';
+  }
+}
+
+// Check if an email was generated by our MCP tool
+function isMcpGeneratedEmail(htmlContent) {
+  // Look for indicators that this email was generated by our MCP tool
+  const mcpIndicators = [
+    // Our styled HTML structure
+    /<html>\s*<head>\s*<meta charset="UTF-8">\s*<style>/,
+    // Our CSS classes
+    /class="email-content"/,
+    /class="signature"/,
+    // Our specific styling patterns
+    /font-family:\s*[^,]+,\s*sans-serif/,
+    // Complete HTML structure we generate
+    /<html>[\s\S]*<head>[\s\S]*<style>[\s\S]*\.email-content/
+  ];
+  
+  for (const indicator of mcpIndicators) {
+    if (indicator.test(htmlContent)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+// Extract signature from HTML content
+function extractSignatureFromHtml(htmlContent) {
+  // Common signature patterns - ordered by reliability
+  const signaturePatterns = [
+    // Explicit signature divs
+    /<div[^>]*id[^>]*signature[^>]*>.*?<\/div>/is,
+    /<div[^>]*class[^>]*signature[^>]*>.*?<\/div>/is,
+    
+    // Outlook signature patterns
+    /<div[^>]*id="Signature"[^>]*>.*?<\/div>/is,
+    /<div[^>]*class="OutlookMessageHeader"[^>]*>.*?<\/div>/is,
+    
+    // Common separators followed by signature content
+    /--\s*<br[^>]*>.*$/is,
+    /<hr[^>]*>.*$/is,
+    
+    // Table-based signatures (common in corporate emails)
+    /<table[^>]*>.*?<\/table>/is,
+    
+    // Look for patterns like "Best regards," "Sincerely," etc. followed by contact info
+    /(?:Best regards|Sincerely|Thanks|Regards|Cheers|Best|Thank you)[\s\S]*?(?:<br[^>]*>|<\/p>|<\/div>)[\s\S]*?(?:@|phone|tel:|mobile|cell)/is,
+    
+    // Look for contact information patterns (email, phone, etc.)
+    /.*?(?:@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}|(?:\+?1[-.\s]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4})[\s\S]*$/is,
+    
+    // Footer-like content at the end
+    /<div[^>]*>.*?(?:@|phone|tel:|mobile|cell|linkedin|twitter).*?<\/div>/is
+  ];
+
+  for (const pattern of signaturePatterns) {
+    const match = htmlContent.match(pattern);
+    if (match && match[0]) {
+      const signature = match[0].trim();
+      // Filter out very short or generic signatures
+      if (signature.length > 20 && !signature.includes('Sent from') && !signature.includes('Get Outlook')) {
+        return signature;
+      }
+    }
+  }
+
+  return '';
+}
+
+// Convert plain text to HTML with basic formatting
+function convertTextToHtml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/\r?\n/g, '<br>')
+    .replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;');
+}
+
+// Apply Outlook-like styling to HTML content
+async function applyOutlookStyling(htmlContent, signature, mailSettings, actualStyling) {
+  // Get user's preferred font and styling from actualStyling (extracted from emails), 
+  // then mailSettings, then defaults
+  const fontFamily = actualStyling?.fontFamily || mailSettings?.defaultFontName || 'Calibri';
+  const fontSize = actualStyling?.fontSize || mailSettings?.defaultFontSize || '11pt';
+  const fontColor = actualStyling?.fontColor || mailSettings?.defaultFontColor || '#000000';
+
+  // Create a complete HTML email with proper styling
+  const styledHtml = `
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <style>
+          body {
+            font-family: ${fontFamily}, sans-serif;
+            font-size: ${fontSize};
+            color: ${fontColor};
+            margin: 0;
+            padding: 0;
+            line-height: 1.4;
+          }
+          .email-content {
+            margin: 0;
+            padding: 0;
+          }
+          .signature {
+            margin-top: 20px;
+            border-top: 1px solid #e0e0e0;
+            padding-top: 10px;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="email-content">
+          ${htmlContent}
+        </div>
+        ${signature ? `<div class="signature">${signature}</div>` : ''}
+      </body>
+    </html>
+  `;
+
+  return styledHtml;
 }

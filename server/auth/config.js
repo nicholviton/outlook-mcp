@@ -15,9 +15,10 @@ export const authConfig = {
       'Tasks.Read',
       'Tasks.ReadWrite',
       'User.Read',
+      'MailboxSettings.Read',
       'offline_access', // Required for refresh tokens
     ].join(' '),
-    redirectUri: 'http://localhost:8400/callback',
+    redirectUri: 'http://localhost:8080/callback',
   },
   
   token: {
@@ -34,8 +35,8 @@ export const authConfig = {
   },
   
   security: {
-    usePKCE: true,
-    encryptTokens: true,
-    auditLogging: true,
+    usePKCE: true,        // PKCE ensures secure authentication without client secrets
+    encryptTokens: true,  // Tokens are encrypted in storage
+    auditLogging: true,   // All authentication events are logged
   },
 };

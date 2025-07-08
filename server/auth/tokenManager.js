@@ -43,7 +43,7 @@ export class TokenManager {
     } catch (error) {
       console.warn('Keytar not available, using fallback encryption key');
       const fallbackKey = crypto.createHash('sha256')
-        .update(this.clientId + process.env.AZURE_TENANT_ID)
+        .update(this.clientId + (process.env.AZURE_TENANT_ID || 'default'))
         .digest();
       return fallbackKey;
     }
@@ -72,11 +72,15 @@ export class TokenManager {
 
     try {
       await keytar.setPassword(SERVICE_NAME, ACCESS_TOKEN_ACCOUNT, this.encrypt(accessToken));
-      await keytar.setPassword(SERVICE_NAME, REFRESH_TOKEN_ACCOUNT, this.encrypt(refreshToken));
+      if (refreshToken) {
+        await keytar.setPassword(SERVICE_NAME, REFRESH_TOKEN_ACCOUNT, this.encrypt(refreshToken));
+      }
     } catch (error) {
       console.warn('Failed to store tokens in keytar, using fallback storage');
       await storage.setItem('fallback_access_token', this.encrypt(accessToken));
-      await storage.setItem('fallback_refresh_token', this.encrypt(refreshToken));
+      if (refreshToken) {
+        await storage.setItem('fallback_refresh_token', this.encrypt(refreshToken));
+      }
     }
 
     const metadata = {

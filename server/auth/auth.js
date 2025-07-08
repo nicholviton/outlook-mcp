@@ -1,23 +1,47 @@
-import { InteractiveBrowserCredential, AuthenticationRecord } from '@azure/identity';
+// OAuth 2.0 authentication is handled manually with PKCE flow
 import { Client } from '@microsoft/microsoft-graph-client';
-import { TokenCredentialAuthenticationProvider } from '@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials/index.js';
 import { TokenManager } from './tokenManager.js';
 import { authConfig } from './config.js';
 import { GraphApiClient } from '../graph/graphClient.js';
 import http from 'http';
 import url from 'url';
 import crypto from 'crypto';
+import { exec } from 'child_process';
 
 export class OutlookAuthManager {
-  constructor(clientId, tenantId, clientSecret = null) {
+  constructor(clientId, tenantId) {
     this.clientId = clientId;
     this.tenantId = tenantId;
-    this.clientSecret = clientSecret;
     this.tokenManager = new TokenManager(clientId);
     this.graphClient = null;
     this.graphApiClient = null;
     this.isAuthenticated = false;
     this.authenticationRecord = null;
+  }
+
+  openBrowser(url) {
+    const platform = process.platform;
+    let command;
+
+    switch (platform) {
+      case 'darwin': // macOS
+        command = `open "${url}"`;
+        break;
+      case 'win32': // Windows
+        command = `start "" "${url}"`;
+        break;
+      default: // Linux and others
+        command = `xdg-open "${url}"`;
+        break;
+    }
+
+    exec(command, (error) => {
+      if (error) {
+        console.log(`Could not open browser automatically. Please manually visit: ${url}`);
+      } else {
+        console.log('Browser opened automatically for authentication');
+      }
+    });
   }
 
   async authenticate() {
@@ -29,11 +53,8 @@ export class OutlookAuthManager {
         return await this.validateAuthentication();
       }
 
-      if (this.clientSecret) {
-        return await this.authenticateWithClientSecret();
-      } else {
-        return await this.authenticateInteractive();
-      }
+      // Use interactive authentication with PKCE for delegated access
+      return await this.authenticateInteractive();
     } catch (error) {
       console.error('Authentication error:', error);
       this.isAuthenticated = false;
@@ -81,6 +102,9 @@ export class OutlookAuthManager {
       authUrl.searchParams.append('code_challenge_method', 'S256');
 
       console.log(`Please visit: ${authUrl.toString()}`);
+      
+      // Attempt to open the browser automatically
+      this.openBrowser(authUrl.toString());
 
       const server = http.createServer(async (req, res) => {
         const parsedUrl = url.parse(req.url, true);
@@ -111,8 +135,8 @@ export class OutlookAuthManager {
         }
       });
 
-      server.listen(8400, () => {
-        console.log('Listening for OAuth callback on http://localhost:8400');
+      server.listen(8080, () => {
+        console.log('Listening for OAuth callback on http://localhost:8080');
       });
 
       setTimeout(() => {
@@ -134,10 +158,6 @@ export class OutlookAuthManager {
       grant_type: 'authorization_code',
       code_verifier: codeVerifier,
     });
-
-    if (this.clientSecret) {
-      params.append('client_secret', this.clientSecret);
-    }
 
     const response = await fetch(tokenUrl, {
       method: 'POST',
@@ -166,10 +186,6 @@ export class OutlookAuthManager {
         refresh_token: refreshToken,
         grant_type: 'refresh_token',
       });
-
-      if (this.clientSecret) {
-        params.append('client_secret', this.clientSecret);
-      }
 
       const response = await fetch(tokenUrl, {
         method: 'POST',
