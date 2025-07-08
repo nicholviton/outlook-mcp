@@ -25,7 +25,8 @@ const server = new Server(
 
 const authManager = new OutlookAuthManager(
   process.env.AZURE_CLIENT_ID,
-  process.env.AZURE_TENANT_ID
+  process.env.AZURE_TENANT_ID,
+  process.env.AZURE_CLIENT_SECRET
 );
 
 server.setRequestHandler('tools/list', async () => {
@@ -223,12 +224,13 @@ async function main() {
   if (!process.env.AZURE_CLIENT_ID || !process.env.AZURE_TENANT_ID) {
     console.error('Error: AZURE_CLIENT_ID and AZURE_TENANT_ID environment variables are required.');
     console.error('Please set these in your MCP server configuration.');
+    console.error('Note: AZURE_CLIENT_SECRET is optional but recommended for server applications.');
     process.exit(1);
   }
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Outlook MCP server started');
+  console.error('Outlook MCP server started with secure token management');
 }
 
 main().catch((error) => {

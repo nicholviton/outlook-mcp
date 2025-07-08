@@ -10,14 +10,20 @@
     "start": "node server/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["mcp", "outlook", "microsoft-graph", "claude"],
+  "keywords": [
+    "mcp",
+    "outlook",
+    "microsoft-graph",
+    "claude"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@azure/identity": "^4.10.2",
     "@microsoft/microsoft-graph-client": "^3.0.7",
-    "@modelcontextprotocol/sdk": "^1.15.0"
+    "@modelcontextprotocol/sdk": "^1.15.0",
+    "keytar": "^7.9.0",
+    "node-persist": "^4.0.4"
   },
-  "devDependencies": {},
   "description": "Microsoft Outlook MCP server for Claude Desktop"
 }
