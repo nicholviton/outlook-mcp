@@ -223,19 +223,29 @@ export async function listEventsTool(authManager, args) {
 }
 
 export async function createEventTool(authManager, args) {
-  const { subject, start, end, body = '', location = '', attendees = [], isOnlineMeeting = false, onlineMeetingProvider = 'teamsForBusiness', recurrence } = args;
+  const { subject, start, end, body = '', bodyType = 'text', location = '', attendees = [], isOnlineMeeting = false, onlineMeetingProvider = 'teamsForBusiness', recurrence, preserveUserStyling = true } = args;
 
   try {
     await authManager.ensureAuthenticated();
     const graphApiClient = authManager.getGraphApiClient();
+
+    // Apply user styling if enabled and body is provided
+    let finalBody = body;
+    let finalBodyType = bodyType;
+    
+    if (preserveUserStyling && finalBody) {
+      const styledBody = await applyUserStyling(graphApiClient, finalBody, bodyType);
+      finalBody = styledBody.content;
+      finalBodyType = styledBody.type;
+    }
 
     const event = {
       subject,
       start,
       end,
       body: {
-        contentType: 'Text',
-        content: body,
+        contentType: finalBodyType === 'html' ? 'HTML' : 'Text',
+        content: finalBody,
       },
     };
 
@@ -576,7 +586,7 @@ export async function searchEmailsTool(authManager, args) {
 }
 
 export async function createDraftTool(authManager, args) {
-  const { to, subject, body, bodyType = 'text', cc = [], bcc = [], importance = 'normal' } = args;
+  const { to, subject, body, bodyType = 'text', cc = [], bcc = [], importance = 'normal', preserveUserStyling = true } = args;
 
   if (!to || to.length === 0) {
     throw new Error('At least one recipient is required');
@@ -590,11 +600,21 @@ export async function createDraftTool(authManager, args) {
     await authManager.ensureAuthenticated();
     const graphApiClient = authManager.getGraphApiClient();
 
+    // Apply user styling if enabled
+    let finalBody = body || '';
+    let finalBodyType = bodyType;
+    
+    if (preserveUserStyling && finalBody) {
+      const styledBody = await applyUserStyling(graphApiClient, finalBody, bodyType);
+      finalBody = styledBody.content;
+      finalBodyType = styledBody.type;
+    }
+
     const draft = {
       subject,
       body: {
-        contentType: bodyType === 'html' ? 'HTML' : 'Text',
-        content: body || '',
+        contentType: finalBodyType === 'html' ? 'HTML' : 'Text',
+        content: finalBody,
       },
       toRecipients: to.map(email => ({
         emailAddress: { address: email },
@@ -630,7 +650,7 @@ export async function createDraftTool(authManager, args) {
 }
 
 export async function replyToEmailTool(authManager, args) {
-  const { messageId, body, bodyType = 'text', comment = '' } = args;
+  const { messageId, body, bodyType = 'text', comment = '', preserveUserStyling = true } = args;
 
   if (!messageId) {
     throw new Error('messageId is required');
@@ -646,19 +666,25 @@ export async function replyToEmailTool(authManager, args) {
 
     const replyPayload = {};
 
-    // If body is provided, create the reply message structure
-    if (body) {
-      replyPayload.message = {
-        body: {
-          contentType: bodyType === 'html' ? 'HTML' : 'Text',
-          content: body,
-        },
-      };
-    }
-
-    // Add comment if provided (this is for the reply action)
-    if (comment) {
-      replyPayload.comment = comment;
+    // Use body or comment as the reply message text
+    const replyText = body || comment;
+    if (replyText) {
+      if (preserveUserStyling) {
+        const styledBody = await applyUserStyling(graphApiClient, replyText, bodyType);
+        replyPayload.message = {
+          body: {
+            contentType: styledBody.type === 'html' ? 'HTML' : 'Text',
+            content: styledBody.content,
+          },
+        };
+      } else {
+        replyPayload.message = {
+          body: {
+            contentType: bodyType === 'html' ? 'HTML' : 'Text',
+            content: replyText,
+          },
+        };
+      }
     }
 
     const result = await graphApiClient.postWithRetry(`/me/messages/${messageId}/reply`, replyPayload);
@@ -677,7 +703,7 @@ export async function replyToEmailTool(authManager, args) {
 }
 
 export async function replyAllTool(authManager, args) {
-  const { messageId, body, bodyType = 'text', comment = '' } = args;
+  const { messageId, body, bodyType = 'text', comment = '', preserveUserStyling = true } = args;
 
   if (!messageId) {
     throw new Error('messageId is required');
@@ -693,19 +719,25 @@ export async function replyAllTool(authManager, args) {
 
     const replyPayload = {};
 
-    // If body is provided, create the reply message structure
-    if (body) {
-      replyPayload.message = {
-        body: {
-          contentType: bodyType === 'html' ? 'HTML' : 'Text',
-          content: body,
-        },
-      };
-    }
-
-    // Add comment if provided (this is for the reply action)
-    if (comment) {
-      replyPayload.comment = comment;
+    // Use body or comment as the reply message text
+    const replyText = body || comment;
+    if (replyText) {
+      if (preserveUserStyling) {
+        const styledBody = await applyUserStyling(graphApiClient, replyText, bodyType);
+        replyPayload.message = {
+          body: {
+            contentType: styledBody.type === 'html' ? 'HTML' : 'Text',
+            content: styledBody.content,
+          },
+        };
+      } else {
+        replyPayload.message = {
+          body: {
+            contentType: bodyType === 'html' ? 'HTML' : 'Text',
+            content: replyText,
+          },
+        };
+      }
     }
 
     const result = await graphApiClient.postWithRetry(`/me/messages/${messageId}/replyAll`, replyPayload);
@@ -724,7 +756,7 @@ export async function replyAllTool(authManager, args) {
 }
 
 export async function forwardEmailTool(authManager, args) {
-  const { messageId, to, body = '', bodyType = 'text', comment = '' } = args;
+  const { messageId, to, body = '', bodyType = 'text', comment = '', preserveUserStyling = true } = args;
 
   if (!messageId) {
     throw new Error('messageId is required');
@@ -744,19 +776,18 @@ export async function forwardEmailTool(authManager, args) {
       })),
     };
 
-    // If body is provided, create the forward message structure
-    if (body) {
-      forwardPayload.message = {
-        body: {
-          contentType: bodyType === 'html' ? 'HTML' : 'Text',
-          content: body,
-        },
-      };
-    }
-
-    // Add comment if provided (this is for the forward action)
-    if (comment) {
-      forwardPayload.comment = comment;
+    // Use body or comment as the forward message text
+    const forwardText = body || comment;
+    if (forwardText) {
+      if (preserveUserStyling) {
+        const styledBody = await applyUserStyling(graphApiClient, forwardText, bodyType);
+        // For forward API, we need to strip HTML tags and use plain text in comment
+        forwardPayload.comment = styledBody.type === 'html' ? 
+          styledBody.content.replace(/<[^>]*>/g, '') : 
+          styledBody.content;
+      } else {
+        forwardPayload.comment = forwardText;
+      }
     }
 
     const result = await graphApiClient.postWithRetry(`/me/messages/${messageId}/forward`, forwardPayload);
@@ -898,7 +929,7 @@ export async function getEventTool(authManager, args) {
 }
 
 export async function updateEventTool(authManager, args) {
-  const { eventId, calendarId, subject, start, end, body, location, attendees, isAllDay, showAs, importance, reminderMinutesBeforeStart, categories } = args;
+  const { eventId, calendarId, subject, start, end, body, bodyType = 'text', location, attendees, isAllDay, showAs, importance, reminderMinutesBeforeStart, categories, preserveUserStyling = true } = args;
 
   if (!eventId) {
     throw new Error('eventId is required');
@@ -924,10 +955,18 @@ export async function updateEventTool(authManager, args) {
     if (categories !== undefined) updateData.categories = categories;
 
     if (body !== undefined) {
-      updateData.body = {
-        contentType: 'Text',
-        content: body,
-      };
+      if (preserveUserStyling) {
+        const styledBody = await applyUserStyling(authManager.getGraphApiClient(), body, bodyType);
+        updateData.body = {
+          contentType: styledBody.type === 'html' ? 'HTML' : 'Text',
+          content: styledBody.content,
+        };
+      } else {
+        updateData.body = {
+          contentType: bodyType === 'html' ? 'HTML' : 'Text',
+          content: body,
+        };
+      }
     }
 
     if (location !== undefined) {
@@ -2252,7 +2291,7 @@ export async function markAsReadTool(authManager, args) {
     const graphApiClient = authManager.getGraphApiClient();
 
     await graphApiClient.makeRequest(`/me/messages/${messageId}`, {
-      isRead: isRead
+      body: { isRead: isRead }
     }, 'PATCH');
 
     return {
@@ -2284,8 +2323,10 @@ export async function flagEmailTool(authManager, args) {
     const graphApiClient = authManager.getGraphApiClient();
 
     await graphApiClient.makeRequest(`/me/messages/${messageId}`, {
-      flag: {
-        flagStatus: flagStatus
+      body: {
+        flag: {
+          flagStatus: flagStatus
+        }
       }
     }, 'PATCH');
 
@@ -2318,7 +2359,7 @@ export async function categorizeEmailTool(authManager, args) {
     const graphApiClient = authManager.getGraphApiClient();
 
     await graphApiClient.makeRequest(`/me/messages/${messageId}`, {
-      categories: categories
+      body: { categories: categories }
     }, 'PATCH');
 
     return {
@@ -2403,12 +2444,12 @@ export async function batchProcessEmailsTool(authManager, args) {
         
         switch (operation) {
           case 'markAsRead':
-            await graphApiClient.makeRequest(`/me/messages/${messageId}`, { isRead: true }, 'PATCH');
+            await graphApiClient.makeRequest(`/me/messages/${messageId}`, { body: { isRead: true } }, 'PATCH');
             result = { messageId, status: 'success', operation: 'marked as read' };
             break;
             
           case 'markAsUnread':
-            await graphApiClient.makeRequest(`/me/messages/${messageId}`, { isRead: false }, 'PATCH');
+            await graphApiClient.makeRequest(`/me/messages/${messageId}`, { body: { isRead: false } }, 'PATCH');
             result = { messageId, status: 'success', operation: 'marked as unread' };
             break;
             
@@ -2445,7 +2486,7 @@ export async function batchProcessEmailsTool(authManager, args) {
           case 'flag':
             const flagStatus = operationData.flagStatus || 'flagged';
             await graphApiClient.makeRequest(`/me/messages/${messageId}`, {
-              flag: { flagStatus }
+              body: { flag: { flagStatus } }
             }, 'PATCH');
             result = { messageId, status: 'success', operation: `flagged as ${flagStatus}` };
             break;
@@ -2453,7 +2494,7 @@ export async function batchProcessEmailsTool(authManager, args) {
           case 'categorize':
             const categories = operationData.categories || [];
             await graphApiClient.makeRequest(`/me/messages/${messageId}`, {
-              categories
+              body: { categories }
             }, 'PATCH');
             result = { messageId, status: 'success', operation: `categorized as ${categories.join(', ')}` };
             break;
