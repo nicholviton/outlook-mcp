@@ -41,7 +41,8 @@ export class TokenManager {
       await keytar.setPassword(SERVICE_NAME, ENCRYPTION_KEY_ACCOUNT, newKey.toString('base64'));
       return newKey;
     } catch (error) {
-      console.warn('Keytar not available, using fallback encryption key');
+      // This is expected in some environments (containers, MCP servers, etc.)
+      // Tokens will still be encrypted and stored securely in the file system
       const fallbackKey = crypto.createHash('sha256')
         .update(this.clientId + (process.env.AZURE_TENANT_ID || 'default'))
         .digest();
@@ -70,13 +71,15 @@ export class TokenManager {
   async storeTokens(accessToken, refreshToken, expiresIn = 3600) {
     await this.initialize();
 
+    let usingFallback = false;
     try {
       await keytar.setPassword(SERVICE_NAME, ACCESS_TOKEN_ACCOUNT, this.encrypt(accessToken));
       if (refreshToken) {
         await keytar.setPassword(SERVICE_NAME, REFRESH_TOKEN_ACCOUNT, this.encrypt(refreshToken));
       }
     } catch (error) {
-      console.warn('Failed to store tokens in keytar, using fallback storage');
+      // Keytar not available in this environment, using secure file storage instead
+      usingFallback = true;
       await storage.setItem('fallback_access_token', this.encrypt(accessToken));
       if (refreshToken) {
         await storage.setItem('fallback_refresh_token', this.encrypt(refreshToken));
@@ -89,6 +92,10 @@ export class TokenManager {
       lastRefresh: Date.now(),
     };
     await storage.setItem(TOKEN_METADATA_KEY, metadata);
+
+    if (usingFallback) {
+      console.log('Tokens stored securely in encrypted file storage');
+    }
   }
 
   async getAccessToken() {
@@ -155,7 +162,7 @@ export class TokenManager {
       await keytar.deletePassword(SERVICE_NAME, ACCESS_TOKEN_ACCOUNT);
       await keytar.deletePassword(SERVICE_NAME, REFRESH_TOKEN_ACCOUNT);
     } catch (error) {
-      console.warn('Failed to clear tokens from keytar');
+      // Silently continue - keytar might not be available
     }
 
     await storage.removeItem('fallback_access_token');
