@@ -1,5 +1,6 @@
 import { Client } from '@microsoft/microsoft-graph-client';
 import { authConfig } from '../auth/config.js';
+import { convertErrorToToolError, createServiceUnavailableError, createRateLimitError, createValidationError } from '../utils/mcpErrorResponse.js';
 
 export class GraphApiClient {
   constructor(authManager) {
@@ -57,7 +58,7 @@ export class GraphApiClient {
   setupMiddleware() {
     // Note: Microsoft Graph SDK handles middleware differently
     // We'll implement rate limiting and retry logic in our makeRequest method instead
-    console.log('Graph client initialized with rate limiting and retry logic');
+    console.error('Graph client initialized with rate limiting and retry logic');
   }
 
   async enforceRateLimit() {
@@ -203,7 +204,7 @@ export class GraphApiClient {
 
         // Log request attempt
         if (retryCount > 0) {
-          console.log(`Graph API retry attempt ${retryCount} for ${method} ${path} [correlation: ${clientRequestId}]`);
+          console.error(`Graph API retry attempt ${retryCount} for ${method} ${path} [correlation: ${clientRequestId}]`);
         }
 
         let response;
@@ -230,7 +231,7 @@ export class GraphApiClient {
         
         const requestDuration = Date.now() - requestStartTime;
         this.updateMetrics(requestDuration);
-        console.log(`Graph API success: ${method} ${path} (${requestDuration}ms) [correlation: ${clientRequestId}]`);
+        console.error(`Graph API success: ${method} ${path} (${requestDuration}ms) [correlation: ${clientRequestId}]`);
         
         return response;
 
@@ -263,6 +264,9 @@ export class GraphApiClient {
               delay = Math.min(delay * authConfig.retry.backoffMultiplier, authConfig.retry.maxDelay);
             }
             continue;
+          } else {
+            // Return rate limit error instead of throwing
+            return createRateLimitError(Math.ceil(waitTime / 1000));
           }
         }
         
@@ -276,6 +280,9 @@ export class GraphApiClient {
             retryCount++;
             delay = Math.min(delay * authConfig.retry.backoffMultiplier, authConfig.retry.maxDelay);
             continue;
+          } else {
+            // Return service unavailable error instead of throwing
+            return createServiceUnavailableError('Microsoft Graph API');
           }
         }
         
@@ -293,21 +300,21 @@ export class GraphApiClient {
           }
         }
         
-        // Log final error and throw
+        // Log final error and return MCP error
         console.error(`Graph API error: ${method} ${path} [correlation: ${clientRequestId}]`);
         console.error('Error details:', JSON.stringify(errorDetails, null, 2));
         
-        this.handleGraphError(error, errorDetails);
+        return this.handleGraphError(error, errorDetails);
       }
     }
 
     // If we get here, all retries have been exhausted
-    throw new Error(`Request failed after ${maxRetries} retry attempts`);
+    return createServiceUnavailableError(`Microsoft Graph API (after ${maxRetries} retry attempts)`);
   }
 
   async makeBatchRequest(requests) {
     if (requests.length > 20) {
-      throw new Error('Batch requests are limited to 20 operations');
+      return createValidationError('requests', 'Batch requests are limited to 20 operations');
     }
 
     await this.initialize();
@@ -326,7 +333,7 @@ export class GraphApiClient {
       const response = await this.client.api('/$batch').post(batchContent);
       return response.responses;
     } catch (error) {
-      this.handleGraphError(error);
+      return this.handleGraphError(error);
     }
   }
 
@@ -378,14 +385,14 @@ export class GraphApiClient {
         userMessage = 'Conflict detected. This may be due to concurrent updates or scheduling conflicts.';
         break;
       case 429:
-        userMessage = 'Rate limit exceeded. The request has been automatically retried.';
-        break;
+        // Return specific rate limit error
+        const retryAfterMs = this.extractRetryAfter(error) || 60000;
+        return createRateLimitError(Math.ceil(retryAfterMs / 1000));
       case 500:
       case 502:
       case 503:
       case 504:
-        userMessage = 'Microsoft Graph service is temporarily unavailable. Please try again.';
-        break;
+        return createServiceUnavailableError('Microsoft Graph API');
       default:
         if (error.code === 'InvalidAuthenticationToken') {
           userMessage = 'Invalid or expired authentication token. Please re-authenticate.';
@@ -402,13 +409,14 @@ export class GraphApiClient {
     // Append support information
     userMessage += supportInfo;
 
+    // Create error with additional properties for MCP error conversion
     const finalError = new Error(userMessage);
     finalError.originalError = error;
     finalError.correlationIds = correlationIds;
     finalError.statusCode = errorDetails.statusCode;
     finalError.retryable = this.isRetryableError(errorDetails.statusCode);
 
-    throw finalError;
+    return convertErrorToToolError(finalError, 'Microsoft Graph API');
   }
 
   isRetryableError(statusCode) {

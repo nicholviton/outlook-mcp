@@ -57,3 +57,16 @@ tokens/
 # package-lock.json
 # yarn.lock
 # pnpm-lock.yaml
+# Temporary test files
+test-*.js
+
+# Personal development documentation (local only)
+MCP_*.md
+*_AUDIT.md
+*_REPORT.md
+*_COMPLETE.md
+PHASE*.md
+outputs/
+
+# Claude Code artifacts
+.claude/

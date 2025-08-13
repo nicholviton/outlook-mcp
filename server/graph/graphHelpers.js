@@ -1,4 +1,5 @@
 // Helper functions for common Graph API operations
+import { convertErrorToToolError, createServiceUnavailableError, createRateLimitError, createValidationError } from '../utils/mcpErrorResponse.js';
 
 export const graphHelpers = {
   // Email helpers
@@ -220,7 +221,7 @@ export const graphHelpers = {
           normalizedDateTime = new Date(dateTime).toISOString();
         }
       } else {
-        throw new Error('Invalid dateTime format. Expected Date object or ISO string.');
+        return createValidationError('dateTime', 'Expected Date object or ISO string');
       }
 
       return {
@@ -246,7 +247,7 @@ export const graphHelpers = {
       } else if (typeof date === 'string') {
         dateStr = date.split('T')[0];
       } else {
-        throw new Error('Invalid date format for all-day event');
+        return createValidationError('date', 'Invalid date format for all-day event');
       }
       
       return {
@@ -294,24 +295,24 @@ export const graphHelpers = {
     // Validate a datetime object
     validateDateTime(dateTime) {
       if (!dateTime || typeof dateTime !== 'object') {
-        return { valid: false, error: 'DateTime must be an object' };
+        return createValidationError('dateTime', 'DateTime must be an object');
       }
       
       if (!dateTime.dateTime) {
-        return { valid: false, error: 'dateTime property is required' };
+        return createValidationError('dateTime', 'dateTime property is required');
       }
       
       try {
         const date = new Date(dateTime.dateTime);
         if (isNaN(date.getTime())) {
-          return { valid: false, error: 'Invalid dateTime value' };
+          return createValidationError('dateTime', 'Invalid dateTime value');
         }
       } catch (error) {
-        return { valid: false, error: 'Invalid dateTime format' };
+        return createValidationError('dateTime', 'Invalid dateTime format');
       }
       
       if (dateTime.timeZone && !this.normalizeTimezone(dateTime.timeZone)) {
-        return { valid: false, error: 'Invalid timezone' };
+        return createValidationError('timeZone', 'Invalid timezone');
       }
       
       return { valid: true };
@@ -556,16 +557,25 @@ export const graphHelpers = {
 
     parseGraphError(error) {
       if (error.body?.error) {
-        return {
+        const graphError = {
           code: error.body.error.code,
           message: error.body.error.message,
           innerError: error.body.error.innerError,
         };
+        
+        // Return MCP error format instead of plain object
+        const finalError = new Error(graphError.message || 'Graph API error');
+        finalError.code = graphError.code;
+        finalError.innerError = graphError.innerError;
+        
+        return convertErrorToToolError(finalError, 'Graph API');
       }
-      return {
-        code: 'Unknown',
-        message: error.message || 'An unknown error occurred',
-      };
+      
+      const message = error.message || 'An unknown error occurred';
+      const finalError = new Error(message);
+      finalError.code = 'Unknown';
+      
+      return convertErrorToToolError(finalError, 'Graph API');
     },
 
     // Format file size for display

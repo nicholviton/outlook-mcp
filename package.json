@@ -8,7 +8,9 @@
   },
   "scripts": {
     "start": "node server/index.js",
-    "test": "node server/test/testGraphClient.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:benchmark": "vitest run server/tests/utils/LRUCache.benchmark.js",
     "test:graph": "node server/test/testGraphClient.js"
   },
   "keywords": [
@@ -24,8 +26,14 @@
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "@modelcontextprotocol/sdk": "^1.15.0",
     "dotenv": "^17.1.0",
-    "keytar": "^7.9.0",
     "node-persist": "^4.0.4"
   },
-  "description": "Microsoft Outlook MCP server for Claude Desktop"
+  "optionalDependencies": {
+    "keytar": "^7.9.0"
+  },
+  "description": "Microsoft Outlook MCP server for Claude Desktop",
+  "devDependencies": {
+    "isomorphic-dompurify": "^2.26.0",
+    "vitest": "^3.2.4"
+  }
 }

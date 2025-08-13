@@ -3,6 +3,7 @@ import { Client } from '@microsoft/microsoft-graph-client';
 import { TokenManager } from './tokenManager.js';
 import { authConfig } from './config.js';
 import { GraphApiClient } from '../graph/graphClient.js';
+import { createAuthError, convertErrorToToolError } from '../utils/mcpErrorResponse.js';
 import http from 'http';
 import url from 'url';
 import crypto from 'crypto';
@@ -56,9 +57,16 @@ export class OutlookAuthManager {
     } catch (error) {
       console.error('Authentication error:', error);
       this.isAuthenticated = false;
+      if (error.isError) {
+        // Already an MCP error, return as-is
+        return {
+          success: false,
+          error: error,
+        };
+      }
       return {
         success: false,
-        error: error.message,
+        error: createAuthError(error.message, true),
       };
     }
   }
@@ -71,7 +79,10 @@ export class OutlookAuthManager {
     const authorizationCode = await this.getAuthorizationCode(codeChallenge);
     
     if (!authorizationCode) {
-      throw new Error('Failed to get authorization code');
+      return {
+        success: false,
+        error: createAuthError('Failed to get authorization code', true),
+      };
     }
 
     const tokenResponse = await this.exchangeCodeForToken(authorizationCode);
@@ -100,9 +111,9 @@ export class OutlookAuthManager {
       authUrl.searchParams.append('code_challenge_method', 'S256');
       authUrl.searchParams.append('prompt', 'select_account');
 
-      console.log(`\nOpening your browser for Microsoft account selection...`);
-      console.log(`If the browser doesn't open automatically, please visit:`);
-      console.log(authUrl.toString());
+      console.error(`\nOpening your browser for Microsoft account selection...`);
+      console.error(`If the browser doesn't open automatically, please visit:`);
+      console.error(authUrl.toString());
       
       // Attempt to open the browser automatically
       this.openBrowser(authUrl.toString());
@@ -177,7 +188,7 @@ export class OutlookAuthManager {
               </html>
             `);
             server.close();
-            reject(new Error('State mismatch - possible CSRF attack'));
+            reject(createAuthError('State mismatch - possible CSRF attack', false));
             return;
           }
 
@@ -342,18 +353,18 @@ export class OutlookAuthManager {
               </html>
             `);
             server.close();
-            reject(new Error('No authorization code received'));
+            reject(createAuthError('No authorization code received', true));
           }
         }
       });
 
       server.listen(8080, () => {
-        console.log('\nWaiting for authentication callback...');
+        console.error('\nWaiting for authentication callback...');
       });
 
       setTimeout(() => {
         server.close();
-        reject(new Error('Authentication timeout'));
+        reject(createAuthError('Authentication timeout - please try again', true));
       }, 5 * 60 * 1000); // 5 minute timeout
     });
   }
@@ -381,7 +392,7 @@ export class OutlookAuthManager {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`Token exchange failed: ${error}`);
+      throw createAuthError(`Token exchange failed: ${error}`, true);
     }
 
     return await response.json();
@@ -409,7 +420,7 @@ export class OutlookAuthManager {
 
       if (!response.ok) {
         const error = await response.text();
-        throw new Error(`Token refresh failed: ${error}`);
+        throw createAuthError(`Token refresh failed: ${error}`, true);
       }
 
       const tokenResponse = await response.json();
@@ -425,7 +436,11 @@ export class OutlookAuthManager {
     } catch (error) {
       console.error('Token refresh failed:', error);
       await this.tokenManager.clearTokens();
-      throw error;
+      if (error.isError) {
+        // Already an MCP error, re-throw as-is
+        throw error;
+      }
+      throw convertErrorToToolError(error, 'Token refresh failed');
     }
   }
 
@@ -473,7 +488,11 @@ export class OutlookAuthManager {
       };
     } catch (error) {
       this.isAuthenticated = false;
-      throw error;
+      if (error.isError) {
+        // Already an MCP error, re-throw as-is
+        throw error;
+      }
+      throw convertErrorToToolError(error, 'User validation failed');
     }
   }
 
@@ -481,17 +500,28 @@ export class OutlookAuthManager {
     if (!this.isAuthenticated || !this.graphClient) {
       const result = await this.authenticate();
       if (!result.success) {
-        throw new Error(`Authentication failed: ${result.error}`);
+        if (result.error.isError) {
+          // Already an MCP error, re-throw as-is
+          throw result.error;
+        }
+        throw createAuthError(`Authentication failed: ${result.error}`, true);
       }
     }
 
     try {
       await this.tokenManager.getAccessToken();
     } catch (error) {
-      if (error.message.includes('needs refresh')) {
+      if (error.isError) {
+        // Handle MCP errors from token manager
+        if (error._errorDetails && error._errorDetails.needsRefresh) {
+          await this.refreshAccessToken();
+        } else {
+          throw error;
+        }
+      } else if (error.message.includes('needs refresh')) {
         await this.refreshAccessToken();
       } else {
-        throw error;
+        throw convertErrorToToolError(error, 'Token validation failed');
       }
     }
 
@@ -500,14 +530,14 @@ export class OutlookAuthManager {
 
   getGraphClient() {
     if (!this.graphClient) {
-      throw new Error('Not authenticated. Call authenticate() first.');
+      throw createAuthError('Not authenticated. Call authenticate() first.', true);
     }
     return this.graphClient;
   }
 
   getGraphApiClient() {
     if (!this.graphApiClient) {
-      throw new Error('Not authenticated. Call authenticate() first.');
+      throw createAuthError('Not authenticated. Call authenticate() first.', true);
     }
     return this.graphApiClient;
   }

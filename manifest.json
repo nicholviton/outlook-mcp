@@ -7,6 +7,20 @@
     "name": "XenoXilus",
     "email": "xenoxilus@gmail.com"
   },
+  "user_config": {
+    "azure_client_id": {
+      "type": "string",
+      "title": "Azure Client ID",
+      "description": "Azure Active Directory application (client) ID",
+      "required": true
+    },
+    "azure_tenant_id": {
+      "type": "string",
+      "title": "Azure Tenant ID", 
+      "description": "Azure Active Directory tenant (directory) ID",
+      "required": true
+    }
+  },
   "server": {
     "type": "node",
     "entry_point": "server/index.js",
@@ -15,7 +29,10 @@
       "args": [
         "${__dirname}/server/index.js"
       ],
-      "env": {}
+      "env": {
+        "AZURE_CLIENT_ID": "${user_config.azure_client_id}",
+        "AZURE_TENANT_ID": "${user_config.azure_tenant_id}"
+      }
     }
   },
   "keywords": [
