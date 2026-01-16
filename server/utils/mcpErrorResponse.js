@@ -39,11 +39,11 @@ export function createProtocolError(code, message, data = null) {
       message
     }
   };
-  
+
   if (data !== null) {
     error.error.data = data;
   }
-  
+
   return error;
 }
 
@@ -67,22 +67,30 @@ export const ErrorCodes = {
  * @returns {Object} MCP-compliant tool error response
  */
 export function convertErrorToToolError(error, context = '') {
-  const message = context 
-    ? `${context}: ${error.message}`
-    : error.message;
-  
+  // If it's already an MCP error, return it as-is
+  if (error && error.isError !== undefined) {
+    return error;
+  }
+
+  // Handle cases where error might not be an Error object
+  const errorMessage = error?.message || error?.toString() || 'Unknown error';
+
+  const message = context
+    ? `${context}: ${errorMessage}`
+    : errorMessage;
+
   const details = {
-    name: error.name,
-    stack: error.stack?.split('\n')[0] // First line only for brevity
+    name: error?.name || 'Error',
+    stack: error?.stack?.split('\n')[0] // First line only for brevity
   };
-  
+
   // Preserve common error properties
-  if (error.statusCode) details.statusCode = error.statusCode;
-  if (error.code) details.code = error.code;
-  if (error.correlationId) details.correlationId = error.correlationId;
-  if (error.correlationIds) details.correlationIds = error.correlationIds;
-  if (error.retryAfter) details.retryAfter = error.retryAfter;
-  
+  if (error?.statusCode) details.statusCode = error.statusCode;
+  if (error?.code) details.code = error.code;
+  if (error?.correlationId) details.correlationId = error.correlationId;
+  if (error?.correlationIds) details.correlationIds = error.correlationIds;
+  if (error?.retryAfter) details.retryAfter = error.retryAfter;
+
   return createToolError(message, details);
 }
 
@@ -109,7 +117,7 @@ export function createAuthError(message, retryable = false) {
   return createToolError(`Authentication failed: ${message}`, {
     type: 'authentication',
     retryable,
-    suggestion: retryable 
+    suggestion: retryable
       ? 'Please re-authenticate your account'
       : 'Check your credentials and try again'
   });

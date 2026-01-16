@@ -138,12 +138,12 @@ export const searchEmailsSchema = {
       },
       limit: {
         type: 'number',
-        description: 'Maximum number of emails to return (max 1000)',
-        default: 100,
+        description: 'Maximum number of emails to return. Default: 25. NOTE: If includeBody is true, this is strictly capped at 5 to prevent context overflow.',
+        default: 25,
       },
       includeBody: {
         type: 'boolean',
-        description: 'Include full email body content for analysis',
+        description: 'Include full email body content for analysis. WARNING: Setting this to true restricts the result limit to 5.',
         default: false,
       },
       truncate: {

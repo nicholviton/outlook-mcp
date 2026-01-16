@@ -1,6 +1,5 @@
 // List emails from a specific folder
 import { convertErrorToToolError, createValidationError } from '../../utils/mcpErrorResponse.js';
-import { convertErrorToToolError, createValidationError } from '../../utils/mcpErrorResponse.js';
 import { createSafeResponse, safeStringify } from '../../utils/jsonUtils.js';
 import { stripHtml, truncateText } from '../../utils/textUtils.js';
 

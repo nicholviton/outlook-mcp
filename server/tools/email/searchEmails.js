@@ -1,5 +1,4 @@
 import { convertErrorToToolError, createValidationError } from '../../utils/mcpErrorResponse.js';
-import { convertErrorToToolError, createValidationError } from '../../utils/mcpErrorResponse.js';
 import { createSafeResponse } from '../../utils/jsonUtils.js';
 import { stripHtml, truncateText } from '../../utils/textUtils.js';
 
@@ -12,7 +11,7 @@ export async function searchEmailsTool(authManager, args) {
     startDate,
     endDate,
     folders = [],
-    limit = 100,
+    limit = 25,
     includeBody = false, // Changed default to false
     truncate = true,
     maxLength = 1000,
@@ -20,12 +19,16 @@ export async function searchEmailsTool(authManager, args) {
     orderBy = 'receivedDateTime desc'
   } = args;
 
+  // Cap limit at 5 when includeBody is true to prevent context overflow
+  const effectiveLimit = includeBody ? Math.min(limit, 5) : limit;
+  const limitWasCapped = includeBody && limit > 5;
+
   try {
     await authManager.ensureAuthenticated();
     const graphApiClient = authManager.getGraphApiClient();
 
     const options = {
-      top: Math.min(limit, 1000) // Cap at 1000 for performance
+      top: Math.min(effectiveLimit, 1000) // Cap at 1000 for performance
       // orderby will be added conditionally after determining if search is used
     };
 
@@ -239,6 +242,7 @@ export async function searchEmailsTool(authManager, args) {
       },
       totalResults: emails.length,
       includesFullBody: includeBody,
+      limitWasCapped: limitWasCapped,
       optimization: useKQLSearch ? 'Using KQL for text-based search (efficient for content search)' :
         isSpecificFolder ? 'Using $filter for specific folder search (comprehensive)' :
           'Using $filter for all-folders search (comprehensive across all folders)'

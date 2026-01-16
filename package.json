@@ -3,9 +3,6 @@
   "version": "1.0.0",
   "main": "server/index.js",
   "type": "module",
-  "directories": {
-    "doc": "docs"
-  },
   "scripts": {
     "start": "node server/index.js",
     "test": "vitest run",

@@ -6,35 +6,34 @@
  */
 
 import { convertErrorToToolError, createValidationError, createToolError } from '../../utils/mcpErrorResponse.js';
-import { handleLargeContent } from '../../utils/fileOutput.js';
+import { handleLargeContent, saveBase64File } from '../../utils/fileOutput.js';
 import { safeStringify, createSafeResponse } from '../../utils/jsonUtils.js';
 import { graphHelpers } from '../../graph/graphHelpers.js';
 import * as XLSX from 'xlsx';
 import officeParser from 'officeparser';
-import { handleLargeContent, saveBase64File } from '../../utils/fileOutput.js';
 
 // Helper function to determine if content should be treated as text
 function isTextContent(contentType, filename, contentBytes = null) {
   console.error(`Debug: isTextContent check - contentType: "${contentType}", filename: "${filename}"`);
-  
+
   const textTypes = [
     'text/',
     'application/json',
     'application/xml',
     'application/javascript',
-    'application/typescript', 
+    'application/typescript',
     'application/x-python',
     'application/x-sh',
     'application/sql'
   ];
-  
+
   const textExtensions = [
     '.txt', '.md', '.csv', '.log', '.ini', '.cfg', '.conf',
     '.html', '.htm', '.xml', '.json', '.js', '.ts', '.py',
     '.sh', '.bash', '.sql', '.css', '.scss', '.less',
     '.yaml', '.yml', '.toml', '.properties', '.env'
   ];
-  
+
   // Check content type first
   if (contentType) {
     const lowerContentType = contentType.toLowerCase();
@@ -43,7 +42,7 @@ function isTextContent(contentType, filename, contentBytes = null) {
       return true;
     }
   }
-  
+
   // Check file extension
   if (filename) {
     const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
@@ -52,16 +51,16 @@ function isTextContent(contentType, filename, contentBytes = null) {
       return true;
     }
   }
-  
+
   // If contentType is null/empty, try to detect from content
   if ((!contentType || contentType.trim() === '') && contentBytes) {
     try {
       const sampleContent = Buffer.from(contentBytes, 'base64').toString('utf8', 0, 200);
-      if (sampleContent.includes('<!DOCTYPE html>') || 
-          sampleContent.includes('<html>') ||
-          sampleContent.includes('<?xml') ||
-          sampleContent.startsWith('{') ||
-          sampleContent.startsWith('[')) {
+      if (sampleContent.includes('<!DOCTYPE html>') ||
+        sampleContent.includes('<html>') ||
+        sampleContent.includes('<?xml') ||
+        sampleContent.startsWith('{') ||
+        sampleContent.startsWith('[')) {
         console.error(`Debug: Detected as text by content analysis`);
         return true;
       }
@@ -69,7 +68,7 @@ function isTextContent(contentType, filename, contentBytes = null) {
       console.error(`Debug: Content analysis failed: ${error.message}`);
     }
   }
-  
+
   console.error(`Debug: Detected as binary`);
   return false;
 }
@@ -85,20 +84,20 @@ function isExcelFile(contentType, filename) {
     'application/vnd.ms-excel.addin.macroEnabled.12', // .xlam
     'application/vnd.ms-excel.sheet.binary.macroEnabled.12' // .xlsb
   ];
-  
+
   const excelExtensions = ['.xlsx', '.xls', '.xlsm', '.xltx', '.xltm', '.xlam', '.xlsb'];
-  
+
   // Check content type
   if (contentType && excelMimeTypes.includes(contentType.toLowerCase())) {
     return true;
   }
-  
+
   // Check file extension
   if (filename) {
     const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
     return excelExtensions.includes(ext);
   }
-  
+
   return false;
 }
 
@@ -106,13 +105,13 @@ function isExcelFile(contentType, filename) {
 function parseExcelContent(contentBytes, filename, maxSheets = 10, maxRowsPerSheet = 1000) {
   try {
     console.error(`Debug: Parsing Excel file: ${filename}`);
-    
+
     // Decode Base64 to buffer
     const buffer = Buffer.from(contentBytes, 'base64');
-    
+
     // Parse Excel file
     const workbook = XLSX.read(buffer, { type: 'buffer' });
-    
+
     const result = {
       type: 'excel',
       filename: filename,
@@ -122,29 +121,29 @@ function parseExcelContent(contentBytes, filename, maxSheets = 10, maxRowsPerShe
         sheetNames: workbook.SheetNames
       }
     };
-    
+
     // Process up to maxSheets sheets
     const sheetsToProcess = workbook.SheetNames.slice(0, maxSheets);
-    
+
     for (const sheetName of sheetsToProcess) {
       console.error(`Debug: Processing sheet: ${sheetName}`);
-      
+
       const worksheet = workbook.Sheets[sheetName];
-      
+
       // Get sheet range
       const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1:A1');
       const totalRows = range.e.r - range.s.r + 1;
       const totalCols = range.e.c - range.s.c + 1;
-      
+
       // Limit rows to prevent overwhelming output
       const rowsToProcess = Math.min(totalRows, maxRowsPerSheet);
-      
+
       // Convert to JSON with limited rows
       const jsonData = XLSX.utils.sheet_to_json(worksheet, {
         header: 1, // Use array format instead of object
-        range: rowsToProcess < totalRows ? `${worksheet['!ref'].split(':')[0]}:${XLSX.utils.encode_cell({r: range.s.r + rowsToProcess - 1, c: range.e.c})}` : undefined
+        range: rowsToProcess < totalRows ? `${worksheet['!ref'].split(':')[0]}:${XLSX.utils.encode_cell({ r: range.s.r + rowsToProcess - 1, c: range.e.c })}` : undefined
       });
-      
+
       const sheetInfo = {
         name: sheetName,
         dimensions: {
@@ -157,17 +156,17 @@ function parseExcelContent(contentBytes, filename, maxSheets = 10, maxRowsPerShe
         displayedRows: jsonData.length,
         note: rowsToProcess < totalRows ? `Sheet truncated to ${maxRowsPerSheet} rows (total: ${totalRows})` : undefined
       };
-      
+
       result.sheets.push(sheetInfo);
     }
-    
+
     if (workbook.SheetNames.length > maxSheets) {
       result.summary.note = `Only first ${maxSheets} sheets displayed (total: ${workbook.SheetNames.length})`;
     }
-    
+
     console.error(`Debug: Successfully parsed Excel file with ${result.sheets.length} sheets`);
     return result;
-    
+
   } catch (error) {
     console.error(`Debug: Excel parsing failed: ${error.message}`);
     return {
@@ -206,7 +205,7 @@ function isOfficeDocument(contentType, filename) {
     'application/rtf',
     'text/rtf'
   ];
-  
+
   const officeExtensions = [
     '.pdf',
     '.doc', '.docx', '.docm', '.dotx', '.dotm',
@@ -214,18 +213,18 @@ function isOfficeDocument(contentType, filename) {
     '.odt', '.odp', '.ods',
     '.rtf'
   ];
-  
+
   // Check content type
   if (contentType && officeMimeTypes.includes(contentType.toLowerCase())) {
     return true;
   }
-  
+
   // Check file extension
   if (filename) {
     const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
     return officeExtensions.includes(ext);
   }
-  
+
   return false;
 }
 
@@ -233,10 +232,10 @@ function isOfficeDocument(contentType, filename) {
 function parseOfficeDocument(contentBytes, filename, maxTextLength = 50000) {
   try {
     console.error(`Debug: Parsing office document: ${filename}`);
-    
+
     // Decode Base64 to buffer
     const buffer = Buffer.from(contentBytes, 'base64');
-    
+
     // Parse office document using officeParser
     return new Promise((resolve) => {
       officeParser.parseOffice(buffer, (data, err) => {
@@ -249,13 +248,13 @@ function parseOfficeDocument(contentBytes, filename, maxTextLength = 50000) {
           });
           return;
         }
-        
+
         // Extract and process the text content
         const extractedText = data || '';
         const textLength = extractedText.length;
         const truncated = textLength > maxTextLength;
         const displayText = truncated ? extractedText.substring(0, maxTextLength) + '...' : extractedText;
-        
+
         const result = {
           type: 'office_document',
           filename: filename,
@@ -272,12 +271,12 @@ function parseOfficeDocument(contentBytes, filename, maxTextLength = 50000) {
             hasContent: textLength > 0
           }
         };
-        
+
         console.error(`Debug: Successfully parsed office document with ${textLength} characters of text`);
         resolve(result);
       });
     });
-    
+
   } catch (error) {
     console.error(`Debug: Office parsing failed: ${error.message}`);
     return Promise.resolve({
@@ -293,9 +292,9 @@ async function decodeSharePointContent(contentBytes, contentType, filename, maxT
   try {
     const buffer = Buffer.from(contentBytes, 'base64');
     const decodedSize = buffer.length;
-    
+
     console.error(`Debug: decodeSharePointContent - size: ${decodedSize}, contentType: "${contentType}", filename: "${filename}"`);
-    
+
     // For text content, decode to string if not too large
     if (isTextContent(contentType, filename, contentBytes)) {
       if (decodedSize <= maxTextSize) {
@@ -322,7 +321,7 @@ async function decodeSharePointContent(contentBytes, contentType, filename, maxT
       // For Excel files, parse and extract data
       console.error(`Debug: Detected Excel file, attempting to parse`);
       const excelData = parseExcelContent(contentBytes, filename);
-      
+
       return {
         type: 'excel',
         content: excelData,
@@ -336,7 +335,7 @@ async function decodeSharePointContent(contentBytes, contentType, filename, maxT
       // For office documents (PDF, Word, PowerPoint), parse and extract text
       console.error(`Debug: Detected office document, attempting to parse`);
       const officeData = await parseOfficeDocument(contentBytes, filename);
-      
+
       return {
         type: 'office',
         content: officeData,
@@ -381,23 +380,23 @@ function parseSharePointUrl(sharePointUrl) {
     const hostname = url.hostname.toLowerCase();
     const pathname = url.pathname;
     const searchParams = Object.fromEntries(url.searchParams);
-    
+
     console.error(`Debug: URL components - hostname: ${hostname}, pathname: ${pathname}`);
     console.error(`Debug: Search params:`, searchParams);
-    
+
     // Check if it's a SharePoint domain
     if (!hostname.includes('sharepoint.com')) {
       throw new Error(`Not a SharePoint URL: ${hostname}`);
     }
-    
+
     // Pattern 1: SharePoint sharing links with format /:x:/r/personal/ or /:w:/r/sites/
     const sharingLinkPattern = /^\/(:[a-z]:)?\/([gr])\/(.+)$/i;
     const sharingMatch = pathname.match(sharingLinkPattern);
-    
+
     if (sharingMatch) {
       const [, docType, accessType, resourcePath] = sharingMatch;
       console.error(`Debug: Detected sharing link - docType: ${docType}, accessType: ${accessType}, resourcePath: ${resourcePath}`);
-      
+
       return {
         type: 'sharing_link',
         hostname,
@@ -410,10 +409,10 @@ function parseSharePointUrl(sharePointUrl) {
         isSite: resourcePath.startsWith('sites/')
       };
     }
-    
+
     // Pattern 2: Direct OneDrive for Business URLs
     if (pathname.includes('/personal/')) {
-      const personalMatch = pathname.match(/\/personal\/([^\/]+)/);  
+      const personalMatch = pathname.match(/\/personal\/([^\/]+)/);
       if (personalMatch) {
         console.error(`Debug: Detected OneDrive personal folder: ${personalMatch[1]}`);
         return {
@@ -425,7 +424,7 @@ function parseSharePointUrl(sharePointUrl) {
         };
       }
     }
-    
+
     // Pattern 3: Team site URLs
     if (pathname.includes('/sites/')) {
       const siteMatch = pathname.match(/\/sites\/([^\/]+)/);
@@ -440,7 +439,7 @@ function parseSharePointUrl(sharePointUrl) {
         };
       }
     }
-    
+
     // Pattern 4: Check for any sharing parameters
     const hasShareParams = searchParams.d || searchParams.e || searchParams.share || searchParams.guestaccess;
     if (hasShareParams) {
@@ -453,7 +452,7 @@ function parseSharePointUrl(sharePointUrl) {
         hasShareParams: true
       };
     }
-    
+
     // Fallback: Generic SharePoint URL
     console.error(`Debug: Falling back to generic SharePoint URL`);
     return {
@@ -462,7 +461,7 @@ function parseSharePointUrl(sharePointUrl) {
       fullPath: pathname,
       searchParams
     };
-    
+
   } catch (error) {
     console.error(`Debug: URL parsing failed: ${error.message}`);
     throw new Error(`Invalid SharePoint URL: ${error.message}`);
@@ -485,12 +484,12 @@ async function resolveSharedFile(graphClient, sharingUrl, urlInfo) {
         .replace(/\+/g, '-')
         .replace(/\//g, '_')
         .replace(/=/g, '');
-      
+
       return await graphClient.makeRequest(`/shares/u!${encodedUrl}/driveItem`, {
         select: 'id,name,size,createdDateTime,lastModifiedDateTime,webUrl,file,folder,@microsoft.graph.downloadUrl,parentReference'
       });
     },
-    
+
     // Strategy 2: Try to extract drive and item info from URL structure
     async () => {
       console.error(`Debug: Trying URL structure parsing`);
@@ -499,7 +498,7 @@ async function resolveSharedFile(graphClient, sharingUrl, urlInfo) {
         // Let's try different approaches to extract useful information
         const dParam = decodeURIComponent(urlInfo.searchParams.d);
         console.error(`Debug: Found 'd' parameter: ${dParam}`);
-        
+
         // Strategy 2a: Try to use the 'd' parameter as a sharing token with Graph API
         try {
           // Some SharePoint URLs use the 'd' parameter as a sharing token
@@ -508,12 +507,12 @@ async function resolveSharedFile(graphClient, sharingUrl, urlInfo) {
             .replace(/\+/g, '-')
             .replace(/\//g, '_')
             .replace(/=/g, '');
-          
+
           console.error(`Debug: Trying 'd' parameter as sharing token`);
           const result = await graphClient.makeRequest(`/shares/u!${encodedSharingUrl}/driveItem`, {
             select: 'id,name,size,createdDateTime,lastModifiedDateTime,webUrl,file,folder,@microsoft.graph.downloadUrl,parentReference'
           });
-          
+
           if (result && result.id) {
             console.error(`Debug: Successfully resolved using 'd' parameter as sharing token`);
             return result;
@@ -521,23 +520,23 @@ async function resolveSharedFile(graphClient, sharingUrl, urlInfo) {
         } catch (sharingTokenError) {
           console.error(`Debug: 'd' parameter as sharing token failed: ${sharingTokenError.message}`);
         }
-        
+
         // Strategy 2b: Try to extract file ID patterns from 'd' parameter
         const fileIdPatterns = [
           /([A-Z0-9]{20,})/gi,  // Long alphanumeric strings
           /([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/gi, // GUIDs
           /([A-Z0-9_-]{15,})/gi // SharePoint-style IDs
         ];
-        
+
         for (const pattern of fileIdPatterns) {
           const matches = dParam.match(pattern);
           if (matches) {
             for (const potentialFileId of matches) {
               console.error(`Debug: Trying potential file ID: ${potentialFileId}`);
-              
+
               // Try different drive contexts
               const driveContexts = ['me', 'root'];
-              
+
               for (const driveContext of driveContexts) {
                 try {
                   const result = await graphClient.makeRequest(`/drives/${driveContext}/items/${potentialFileId}`, {
@@ -555,19 +554,19 @@ async function resolveSharedFile(graphClient, sharingUrl, urlInfo) {
       }
       throw new Error('Could not extract usable file information from URL parameters');
     },
-    
+
     // Strategy 3: Try SharePoint REST API endpoint construction
     async () => {
       console.error(`Debug: Trying SharePoint REST API approach`);
       if (urlInfo.type === 'sharing_link' || urlInfo.type === 'sharing_with_params') {
         // Extract site collection and construct direct API call
         const siteUrl = `https://${urlInfo.hostname}`;
-        
+
         // Try to get the site information first
         const siteResponse = await graphClient.makeRequest(`/sites/${urlInfo.hostname}:/`, {
           select: 'id,displayName,webUrl'
         });
-        
+
         if (siteResponse && siteResponse.id) {
           console.error(`Debug: Found site ID: ${siteResponse.id}`);
           // This would require additional parsing to get to the specific file
@@ -585,9 +584,9 @@ async function resolveSharedFile(graphClient, sharingUrl, urlInfo) {
       throw new Error('SharePoint REST API approach not applicable');
     }
   ];
-  
+
   let lastError = null;
-  
+
   // Try each strategy in sequence
   for (const [index, strategy] of strategies.entries()) {
     try {
@@ -602,7 +601,7 @@ async function resolveSharedFile(graphClient, sharingUrl, urlInfo) {
       lastError = error;
     }
   }
-  
+
   // All strategies failed
   throw new Error(`Failed to resolve shared file after trying ${strategies.length} strategies. Last error: ${lastError?.message || 'Unknown error'}`);
 }
@@ -621,7 +620,7 @@ async function getFileFromDrive(graphClient, driveId, itemId, downloadContent = 
     const fileInfo = await graphClient.makeRequest(`/drives/${driveId}/items/${itemId}`, {
       select: 'id,name,size,createdDateTime,lastModifiedDateTime,webUrl,file,folder,@microsoft.graph.downloadUrl'
     });
-    
+
     const result = {
       id: fileInfo.id,
       name: fileInfo.name,
@@ -633,11 +632,11 @@ async function getFileFromDrive(graphClient, driveId, itemId, downloadContent = 
       mimeType: fileInfo.file?.mimeType,
       downloadUrl: fileInfo['@microsoft.graph.downloadUrl']
     };
-    
+
     // Download content if requested and file is not too large
     if (downloadContent && !fileInfo.folder) {
       const maxSize = 50 * 1024 * 1024; // 50MB limit
-      
+
       if (fileInfo.size > maxSize) {
         result.contentError = `File too large to download inline (${Math.round(fileInfo.size / 1024 / 1024)}MB > 50MB). Use downloadUrl for direct download.`;
       } else {
@@ -647,10 +646,10 @@ async function getFileFromDrive(graphClient, driveId, itemId, downloadContent = 
             const contentBuffer = await contentResponse.arrayBuffer();
             const contentBytes = Buffer.from(contentBuffer).toString('base64');
             const contentType = contentResponse.headers.get('content-type') || fileInfo.file?.mimeType;
-            
+
             // Decode content intelligently based on type
             const decodedContent = await decodeSharePointContent(contentBytes, contentType, fileInfo.name);
-            
+
             // Add decoded content info
             result.content = decodedContent.content;
             result.decodedContentType = decodedContent.type;
@@ -658,17 +657,17 @@ async function getFileFromDrive(graphClient, driveId, itemId, downloadContent = 
             result.contentType = contentType;
             result.contentSize = decodedContent.size;
             result.sizeFormatted = decodedContent.sizeFormatted;
-            
+
             // Keep raw Base64 for binary files or when needed
             if (decodedContent.contentBytes) {
               result.contentBytes = decodedContent.contentBytes;
             }
-            
+
             // Add any additional info
             if (decodedContent.note) {
               result.note = decodedContent.note;
             }
-            
+
             if (decodedContent.error) {
               result.decodingError = decodedContent.error;
             }
@@ -678,7 +677,7 @@ async function getFileFromDrive(graphClient, driveId, itemId, downloadContent = 
         }
       }
     }
-    
+
     return result;
   } catch (error) {
     console.error('Error getting file from drive:', error);
@@ -698,38 +697,38 @@ export async function getSharePointFileTool(authManager, args) {
     if (!args.sharePointUrl && !args.fileId) {
       return createValidationError('sharePointUrl or fileId', 'Either SharePoint URL or file ID is required');
     }
-    
+
     // Ensure authentication
     const graphClient = await authManager.ensureAuthenticated();
     const graphApiClient = authManager.getGraphApiClient();
-    
+
     let fileResult;
-    
+
     if (args.sharePointUrl) {
       console.error(`Fetching SharePoint file from URL: ${args.sharePointUrl}`);
-      
+
       // Parse the SharePoint URL
       const urlInfo = parseSharePointUrl(args.sharePointUrl);
       console.error('Parsed URL info:', safeStringify(urlInfo, 2));
-      
+
       // Standard SharePoint sharing URLs from emails should be processed directly
       // They follow the format: /:x:/r/personal/ or /:w:/r/sites/ with d= and e= parameters
-      if (urlInfo.type === 'sharing_link' || 
-          urlInfo.type === 'sharing_with_params' || 
-          urlInfo.hasShareParams ||
-          // Check for standard sharing parameters from email links
-          (urlInfo.searchParams && (urlInfo.searchParams.d || urlInfo.searchParams.e))) {
-        
+      if (urlInfo.type === 'sharing_link' ||
+        urlInfo.type === 'sharing_with_params' ||
+        urlInfo.hasShareParams ||
+        // Check for standard sharing parameters from email links
+        (urlInfo.searchParams && (urlInfo.searchParams.d || urlInfo.searchParams.e))) {
+
         console.error('Debug: Detected standard SharePoint sharing URL from email, attempting resolution');
         try {
           fileResult = await resolveSharedFile(graphApiClient, args.sharePointUrl, urlInfo);
           console.error(`Debug: Successfully resolved file: ${fileResult.name}`);
-          
+
           // Handle content download if requested
           if (args.downloadContent && !fileResult.folder) {
             console.error('Debug: Content download requested for resolved sharing link');
             const maxSize = 50 * 1024 * 1024; // 50MB limit
-            
+
             if (fileResult.size > maxSize) {
               fileResult.contentError = `File too large to download inline (${Math.round(fileResult.size / 1024 / 1024)}MB > 50MB). Use downloadUrl for direct download.`;
             } else {
@@ -747,20 +746,20 @@ export async function getSharePointFileTool(authManager, args) {
                     throw new Error('No download URL available and insufficient metadata to fetch it');
                   }
                 }
-                
+
                 const actualDownloadUrl = fileResult['@microsoft.graph.downloadUrl'];
                 console.error(`Debug: Using download URL: ${actualDownloadUrl ? 'URL available' : 'URL missing'}`);
-                
+
                 if (actualDownloadUrl) {
                   const contentResponse = await fetch(actualDownloadUrl);
                   if (contentResponse.ok) {
                     const contentBuffer = await contentResponse.arrayBuffer();
                     const contentBytes = Buffer.from(contentBuffer).toString('base64');
                     const contentType = contentResponse.headers.get('content-type') || fileResult.mimeType;
-                    
+
                     // Decode content intelligently based on type
                     const decodedContent = await decodeSharePointContent(contentBytes, contentType, fileResult.name);
-                    
+
                     // Add decoded content info
                     fileResult.content = decodedContent.content;
                     fileResult.decodedContentType = decodedContent.type;
@@ -768,21 +767,21 @@ export async function getSharePointFileTool(authManager, args) {
                     fileResult.contentType = contentType;
                     fileResult.contentSize = decodedContent.size;
                     fileResult.sizeFormatted = decodedContent.sizeFormatted;
-                    
+
                     // Keep raw Base64 for binary files or when needed
                     if (decodedContent.contentBytes) {
                       fileResult.contentBytes = decodedContent.contentBytes;
                     }
-                    
+
                     // Add any additional info
                     if (decodedContent.note) {
                       fileResult.note = decodedContent.note;
                     }
-                    
+
                     if (decodedContent.error) {
                       fileResult.decodingError = decodedContent.error;
                     }
-                    
+
                     console.error(`Debug: Successfully downloaded and decoded content (type: ${decodedContent.type}, size: ${decodedContent.size} bytes)`);
                   } else {
                     fileResult.contentError = `Failed to download content: HTTP ${contentResponse.status} ${contentResponse.statusText}`;
@@ -815,7 +814,7 @@ export async function getSharePointFileTool(authManager, args) {
             }
           );
         }
-        
+
       } else if (urlInfo.type === 'onedrive_personal' || urlInfo.type === 'team_site') {
         // For direct site URLs, try to provide more helpful guidance
         return createToolError(
@@ -832,7 +831,7 @@ export async function getSharePointFileTool(authManager, args) {
             ]
           }
         );
-        
+
       } else {
         // Generic SharePoint URL
         return createToolError(
@@ -854,7 +853,7 @@ export async function getSharePointFileTool(authManager, args) {
       const driveId = args.driveId || 'me'; // Default to user's OneDrive
       fileResult = await getFileFromDrive(graphApiClient, driveId, args.fileId, args.downloadContent);
     }
-    
+
     const response = {
       success: true,
       file: fileResult,
@@ -865,7 +864,7 @@ export async function getSharePointFileTool(authManager, args) {
         webUrl: 'Use webUrl to view file in SharePoint/OneDrive'
       }
     };
-    
+
     // Handle large content by saving to file if necessary
     const finalResponse = await handleLargeContent(response, ['file.contentBytes', 'file.content'], {
       filenameSuffix: fileResult.name ? `_${fileResult.name}` : '_sharepoint_file',
@@ -876,7 +875,7 @@ export async function getSharePointFileTool(authManager, args) {
         originalUrl: args.sharePointUrl || 'Direct file access'
       }
     });
-    
+
     if (finalResponse.savedToFile) {
       // Add helpful context when content was saved to file
       finalResponse.file = {
@@ -894,14 +893,14 @@ export async function getSharePointFileTool(authManager, args) {
     }
 
     return createSafeResponse(finalResponse);
-    
+
   } catch (error) {
     console.error('SharePoint file access error:', error);
-    
+
     if (error.isError) {
       return error; // Already an MCP error
     }
-    
+
     return convertErrorToToolError(error, 'SharePoint file access failed');
   }
 }
@@ -917,16 +916,16 @@ export async function resolveSharePointLinkTool(authManager, args) {
     if (!args.sharePointUrl) {
       return createValidationError('sharePointUrl', 'SharePoint URL is required');
     }
-    
+
     const graphApiClient = authManager.getGraphApiClient();
-    
+
     // Parse the URL first
     const urlInfo = parseSharePointUrl(args.sharePointUrl);
     console.error('Resolve SharePoint link - Parsed URL info:', safeStringify(urlInfo, 2));
-    
+
     // Resolve the sharing link to get metadata only
     const fileInfo = await resolveSharedFile(graphApiClient, args.sharePointUrl, urlInfo);
-    
+
     const result = {
       id: fileInfo.id,
       name: fileInfo.name,
@@ -943,7 +942,7 @@ export async function resolveSharePointLinkTool(authManager, args) {
         accessible: true
       }
     };
-    
+
     // Add permissions info if requested
     if (args.includePermissions) {
       try {
@@ -953,7 +952,7 @@ export async function resolveSharePointLinkTool(authManager, args) {
         result.sharing.permissionsError = 'Could not retrieve permissions information';
       }
     }
-    
+
     return createSafeResponse({
       success: true,
       file: result,
@@ -964,7 +963,7 @@ export async function resolveSharePointLinkTool(authManager, args) {
         fileId: 'Use id with outlook_get_sharepoint_file for content download'
       }
     });
-    
+
   } catch (error) {
     console.error('SharePoint link resolution error:', error);
     return convertErrorToToolError(error, 'SharePoint link resolution failed');
@@ -980,7 +979,7 @@ export async function resolveSharePointLinkTool(authManager, args) {
 export async function listSharePointFilesTool(authManager, args) {
   try {
     const graphApiClient = authManager.getGraphApiClient();
-    
+
     let listPath;
     if (args.siteId && args.driveId) {
       listPath = `/sites/${args.siteId}/drives/${args.driveId}/root/children`;
@@ -989,17 +988,17 @@ export async function listSharePointFilesTool(authManager, args) {
     } else {
       listPath = '/me/drive/root/children'; // Default to user's OneDrive
     }
-    
+
     if (args.folderId) {
       listPath = `/drives/${args.driveId || 'me'}/items/${args.folderId}/children`;
     }
-    
+
     const response = await graphApiClient.makeRequest(listPath, {
       select: 'id,name,size,createdDateTime,lastModifiedDateTime,webUrl,file,folder',
       top: args.limit || 50,
       orderby: args.orderBy || 'name'
     });
-    
+
     const files = (response.value || []).map(item => ({
       id: item.id,
       name: item.name,
@@ -1010,14 +1009,14 @@ export async function listSharePointFilesTool(authManager, args) {
       lastModifiedDateTime: item.lastModifiedDateTime,
       webUrl: item.webUrl
     }));
-    
+
     return createSafeResponse({
       success: true,
       files: files,
       count: files.length,
       message: `Found ${files.length} items`
     });
-    
+
   } catch (error) {
     console.error('SharePoint list files error:', error);
     return convertErrorToToolError(error, 'SharePoint file listing failed');

@@ -115,6 +115,7 @@ process.on('uncaughtException', (error) => {
       {
         capabilities: {
           tools: {},
+          prompts: {},
         },
       }
     );

@@ -106,19 +106,13 @@ export class OutlookAuthManager {
 
       authUrl.searchParams.append('client_id', this.clientId);
       authUrl.searchParams.append('response_type', 'code');
-      authUrl.searchParams.append('redirect_uri', `http://localhost:${server.address().port}/callback`);
+      // redirect_uri will be set after server starts and we know the port
       authUrl.searchParams.append('scope', authConfig.oauth.scope);
       authUrl.searchParams.append('state', state);
       authUrl.searchParams.append('code_challenge', codeChallenge);
       authUrl.searchParams.append('code_challenge_method', 'S256');
       authUrl.searchParams.append('prompt', 'select_account');
 
-      console.error(`\nOpening your browser for Microsoft account selection...`);
-      console.error(`If the browser doesn't open automatically, please visit:`);
-      console.error(authUrl.toString());
-
-      // Attempt to open the browser automatically
-      this.openBrowser(authUrl.toString());
 
       const server = http.createServer(async (req, res) => {
         const parsedUrl = url.parse(req.url, true);
