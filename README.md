@@ -2,6 +2,9 @@
 
 A Model Context Protocol (MCP) server that enables AI assistants to interact with Microsoft Outlook email and calendar through the Microsoft Graph API.
 
+[![Download Latest Release](https://img.shields.io/github/v/release/XenoXilus/outlook-mcp?label=Download&color=blue)](https://github.com/XenoXilus/outlook-mcp/releases/latest)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-ff5f5f?logo=ko-fi)](https://ko-fi.com/xenoxilus)
+
 ## Features
 
 - **Email Operations**: Read, search, send, reply to emails and download attachments
@@ -10,20 +13,91 @@ A Model Context Protocol (MCP) server that enables AI assistants to interact wit
 - **Office Document Processing**: Parse PDF, Word, PowerPoint, and Excel files with extracted text content
 - **Large File Support**: Automatic handling of files that exceed MCP response size limits
 
+## Quick Start
+
+**Choose your installation method:**
+
+| Method | Best For |
+|--------|----------|
+| [DXT Extension](#installing-as-dxt-extension) | Claude Desktop users |
+| [CLI Configuration](#using-with-cli-tools) | Claude Code, mcp CLI, other MCP clients |
+
+> **Prerequisites**: Before installing, you'll need to [set up an Azure application](#azure-setup-guide) to get your Client ID and Tenant ID.
+
+---
+
 ## Installation
 
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd outlook-mcp
-```
+### Installing as DXT Extension
 
-2. Install dependencies:
+For Claude Desktop users, DXT extensions provide the simplest installation experience.
+
+**Option 1: Download Pre-built Extension**
+1. Download `outlook-mcp.dxt` from the [Releases page](https://github.com/XenoXilus/outlook-mcp/releases)
+2. In Claude Desktop, go to **Settings** → **Extensions**
+3. Click **Install from file** and select the `.dxt` file
+4. Enter your Azure Client ID, Tenant ID, and optional download directory when prompted
+
+**Option 2: Build from Source**
+1. Clone and install dependencies:
+   ```bash
+   git clone https://github.com/XenoXilus/outlook-mcp.git
+   cd outlook-mcp
+   npm install
+   ```
+2. Install the DXT CLI: `npm install -g @anthropic-ai/dxt`
+3. Pack the extension:
+   ```bash
+   dxt pack . outlook-mcp.dxt
+   ```
+4. Install the generated `.dxt` file in Claude Desktop as above
+
+---
+
+### Using with CLI Tools
+
+For CLI-based MCP clients (Claude Code, mcp CLI, etc.), configure the server directly.
+
+**1. Clone and Install:**
 ```bash
+git clone https://github.com/XenoXilus/outlook-mcp.git
+cd outlook-mcp
 npm install
 ```
 
-3. Configure the server (see below).
+**2. Configure your MCP client:**
+
+Add the following to your MCP servers configuration (location varies by client):
+
+```json
+{
+  "outlook-mcp": {
+    "command": "node",
+    "args": ["/absolute/path/to/outlook-mcp/server/index.js"],
+    "env": {
+      "AZURE_CLIENT_ID": "your-azure-client-id",
+      "AZURE_TENANT_ID": "your-azure-tenant-id",
+      "MCP_OUTLOOK_WORK_DIR": "/optional/download/directory"
+    }
+  }
+}
+```
+
+**Common config file locations:**
+- **Claude Code**: `~/.claude.json` or project-level `.mcp.json`
+- **mcp CLI**: `~/.config/mcp/servers.json`
+
+**3. Alternative: Use environment variables**
+
+Instead of specifying `env` in the config, you can export the variables in your shell:
+
+```bash
+export AZURE_CLIENT_ID="your-azure-client-id"
+export AZURE_TENANT_ID="your-azure-tenant-id"
+export MCP_OUTLOOK_WORK_DIR="/optional/download/directory"
+```
+
+---
 
 ## Azure Setup Guide
 
@@ -66,48 +140,28 @@ Personal Microsoft accounts can also register apps in Azure:
 3. Follow the same steps as above for Business accounts.
 4. When configuring, use **Accounts in any organizational directory and personal Microsoft accounts** for supported account types.
 
-## Configuration
+---
+
+## Configuration Reference
 
 ### Environment Variables
 
-- `AZURE_CLIENT_ID`: Your Azure AD application client ID (required)
-- `AZURE_TENANT_ID`: Your Azure AD directory (tenant) ID (required)
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AZURE_CLIENT_ID` | Yes | Your Azure AD application client ID |
+| `AZURE_TENANT_ID` | Yes | Your Azure AD directory (tenant) ID |
+| `MCP_OUTLOOK_WORK_DIR` | No | Directory for saving large files (defaults to system temp) |
 
-- `MCP_OUTLOOK_WORK_DIR`: Directory for saving large files that exceed MCP response limits (optional)
-
-#### Large File Handling
+### Large File Handling
 
 When downloading large attachments or SharePoint files, the server automatically detects when the response would exceed the MCP 1MB limit and saves the content to local files instead.
 
-**MCP_OUTLOOK_WORK_DIR Configuration:**
-- If set, large files are saved to this directory
+- If `MCP_OUTLOOK_WORK_DIR` is set, large files are saved to this directory
 - If not set, files are saved to the system temp directory
 - Files are automatically named with timestamps to avoid conflicts
 - Old files are periodically cleaned up to manage disk space
 
-Example configuration:
-```bash
-export MCP_OUTLOOK_WORK_DIR="/path/to/your/work/directory"
-export AZURE_CLIENT_ID="your-client-id"
-export AZURE_TENANT_ID="your-tenant-id"
-```
-
-### Installing as DXT Extension
-
-**Option 1: Download Pre-built Extension**
-1. Download `outlook-mcp.dxt` from the [Releases page](https://github.com/XenoXilus/outlook-mcp/releases)
-2. In Claude Desktop, go to **Settings** → **Extensions**
-3. Click **Install from file** and select the `.dxt` file
-4. Enter your Azure Client ID, Tenant ID, and optional download directory when prompted
-
-**Option 2: Build from Source**
-1. Clone and install dependencies (see Installation above)
-2. Install the DXT CLI: `npm install -g @anthropic-ai/dxt`
-3. Pack the extension:
-   ```bash
-   dxt pack . outlook-mcp.dxt
-   ```
-4. Install the generated `.dxt` file in Claude Desktop as above
+---
 
 ## Example Prompts
 
@@ -137,6 +191,8 @@ The server automatically parses:
 - **PowerPoint** (.pptx): Extracts slide text
 - **Excel** (.xlsx): Parses data into structured format
 
+---
+
 ## Authentication
 
 The server uses OAuth 2.0 with PKCE for secure authentication:
@@ -146,7 +202,7 @@ The server uses OAuth 2.0 with PKCE for secure authentication:
 3. Automatic token refresh for long-term usage
 4. No sensitive data stored in plain text
 
-## Required Permissions
+### Required Permissions
 
 The app requests these Microsoft Graph permissions:
 
@@ -157,23 +213,26 @@ The app requests these Microsoft Graph permissions:
 - `Sites.Read.All`, `Sites.ReadWrite.All` - SharePoint sites
 - `offline_access` - Refresh tokens
 
-## File Size Limits and Handling
+---
 
-### MCP Response Size Limit
-- MCP responses are limited to 1MB
-- Large files automatically trigger file output mode
-- Content is saved locally and file paths are returned instead
+## Troubleshooting
 
-### File Output Behavior
-1. **Automatic Detection**: Server checks if response size would exceed 1MB
-2. **Local Saving**: Large content is saved to `MCP_OUTLOOK_WORK_DIR` or system temp
-3. **Metadata Response**: Returns file metadata with local file paths
-4. **Alternative Access**: Provides download URLs and web URLs for direct access
+### Large File Issues
+- **Problem**: "Result exceeds maximum length" error
+- **Solution**: Ensure `MCP_OUTLOOK_WORK_DIR` is set and writable
+- **Alternative**: Files automatically save to system temp if work dir not configured
 
-### Supported File Types for Parsing
-- **Text Files**: .txt, .md, .csv, .log, .json, .xml, .html, .js, .py, etc.
-- **Office Documents**: .pdf, .doc/.docx, .ppt/.pptx, .xls/.xlsx
-- **Binary Files**: Preserved as Base64 for external processing
+### Authentication Issues
+- **Problem**: Authentication failures
+- **Solution**: Verify Azure AD app permissions and client ID
+- **Reset**: Clear stored tokens and re-authenticate
+
+### SharePoint Access Issues
+- **Problem**: Cannot access SharePoint files
+- **Solution**: Ensure sharing links are valid and user has access permissions
+- **Alternative**: Use direct file ID access if available
+
+---
 
 ## Development
 
@@ -207,28 +266,15 @@ npm run test:benchmark      # Performance benchmarks
 npm run test:graph          # Test Graph API connection
 ```
 
-## Troubleshooting
-
-### Large File Issues
-- **Problem**: "Result exceeds maximum length" error
-- **Solution**: Ensure `MCP_OUTLOOK_WORK_DIR` is set and writable
-- **Alternative**: Files automatically save to system temp if work dir not configured
-
-### Authentication Issues
-- **Problem**: Authentication failures
-- **Solution**: Verify Azure AD app permissions and client ID
-- **Reset**: Clear stored tokens and re-authenticate
-
-### SharePoint Access Issues
-- **Problem**: Cannot access SharePoint files
-- **Solution**: Ensure sharing links are valid and user has access permissions
-- **Alternative**: Use direct file ID access if available
+---
 
 ## Support
 
 If this tool saved you time, consider supporting the development!
 
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-ff5f5f?logo=ko-fi)](https://ko-fi.com/xenoxilus)
+
+---
 
 ## License
 
