@@ -101,7 +101,11 @@ process.on('uncaughtException', (error) => {
       // SharePoint Tools
       getSharePointFileTool,
       listSharePointFilesTool,
-      resolveSharePointLinkTool
+      resolveSharePointLinkTool,
+      // Advanced Email Management Tools
+      batchMoveEmailsTool,
+      analyzeInboxTool,
+      identifyActionItemsTool
     } = tools;
 
     console.error('Debug: All required tools extracted successfully');
@@ -262,6 +266,15 @@ process.on('uncaughtException', (error) => {
 
           case 'outlook_batch_process_emails':
             return await batchProcessEmailsTool(authManager, args);
+
+          case 'outlook_batch_move_emails':
+            return await batchMoveEmailsTool(authManager, args);
+
+          case 'outlook_analyze_inbox':
+            return await analyzeInboxTool(authManager, args);
+
+          case 'outlook_identify_action_items':
+            return await identifyActionItemsTool(authManager, args);
 
           case 'outlook_list_folders':
             return await listFoldersTool(authManager, args);

@@ -17,15 +17,18 @@ export { searchEmailsTool } from './email/searchEmails.js';
 export { createDraftTool } from './email/createDraft.js';
 export { replyToEmailTool, replyAllTool } from './email/replyEmail.js';
 export { forwardEmailTool } from './email/forwardEmail.js';
-export { 
-  deleteEmailTool, 
-  moveEmailTool, 
-  markAsReadTool, 
-  flagEmailTool, 
-  categorizeEmailTool, 
-  archiveEmailTool, 
-  batchProcessEmailsTool 
+export {
+  deleteEmailTool,
+  moveEmailTool,
+  markAsReadTool,
+  flagEmailTool,
+  categorizeEmailTool,
+  archiveEmailTool,
+  batchProcessEmailsTool
 } from './email/emailManagement.js';
+export { batchMoveEmailsTool } from './email/batchOperations.js';
+export { analyzeInboxTool } from './email/inboxAnalysis.js';
+export { identifyActionItemsTool } from './email/actionItemDetection.js';
 
 // Calendar tools
 export { listEventsTool } from './calendar/listEvents.js';

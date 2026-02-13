@@ -469,6 +469,129 @@ export const batchProcessEmailsSchema = {
   },
 };
 
+export const batchMoveEmailsSchema = {
+  name: 'outlook_batch_move_emails',
+  description: 'Move multiple emails by date range using efficient batch operations. Supports dry-run mode to preview changes before execution.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      sourceFolderId: {
+        type: 'string',
+        description: 'Source folder name or ID (default: inbox). Examples: "inbox", "Sent Items", "Archive"',
+        default: 'inbox',
+      },
+      destinationFolderId: {
+        type: 'string',
+        description: 'Destination folder name or ID. Examples: "Archive", "Projects/Important"',
+      },
+      startDate: {
+        type: 'string',
+        description: 'Start date for date range filter (ISO 8601 format, e.g., 2026-01-01T00:00:00Z)',
+      },
+      endDate: {
+        type: 'string',
+        description: 'End date for date range filter (ISO 8601 format, e.g., 2026-01-15T23:59:59Z)',
+      },
+      limit: {
+        type: 'number',
+        description: 'Maximum number of emails to move (default: 100, max: 500)',
+        default: 100,
+      },
+      dryRun: {
+        type: 'boolean',
+        description: 'If true, show what would be moved without executing (default: true for safety)',
+        default: true,
+      },
+    },
+    required: ['destinationFolderId', 'startDate', 'endDate'],
+  },
+};
+
+export const analyzeInboxSchema = {
+  name: 'outlook_analyze_inbox',
+  description: 'Analyze inbox or folder contents to provide insights about email categories, top senders, time patterns, and action items',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      folder: {
+        type: 'string',
+        description: 'Folder name or ID to analyze (default: inbox)',
+        default: 'inbox',
+      },
+      analysisType: {
+        type: 'string',
+        enum: ['categories', 'senders', 'time-patterns', 'action-items'],
+        description: 'Type of analysis: "categories" (sender domains, subject keywords), "senders" (top email senders), "time-patterns" (day/hour distribution), "action-items" (flagged, unread, requiring attention)',
+        default: 'categories',
+      },
+      startDate: {
+        type: 'string',
+        description: 'Start date for analysis period (ISO 8601 format, optional)',
+      },
+      endDate: {
+        type: 'string',
+        description: 'End date for analysis period (ISO 8601 format, optional)',
+      },
+      limit: {
+        type: 'number',
+        description: 'Maximum number of emails to analyze (default: 100, max: 1000)',
+        default: 100,
+      },
+    },
+  },
+};
+
+export const identifyActionItemsSchema = {
+  name: 'outlook_identify_action_items',
+  description: 'Identify emails requiring user response based on multiple criteria (unread, flagged, from VIPs, keywords). Returns prioritized list.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      criteria: {
+        type: 'object',
+        description: 'Criteria for identifying action items',
+        properties: {
+          unread: {
+            type: 'boolean',
+            description: 'Include unread emails (default: true)',
+            default: true,
+          },
+          flagged: {
+            type: 'boolean',
+            description: 'Include flagged emails (default: true)',
+            default: true,
+          },
+          fromVIPs: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Email addresses or domains of VIP senders to prioritize (e.g., ["boss@company.com", "client.com"])',
+          },
+          keywords: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Action-related keywords to search for in subjects (default: ["urgent", "action required", "asap", "follow up", "deadline", "please review"])',
+          },
+          daysOld: {
+            type: 'number',
+            description: 'Only include emails from the last N days (default: 30)',
+            default: 30,
+          },
+          folder: {
+            type: 'string',
+            description: 'Folder to search in (default: inbox)',
+            default: 'inbox',
+          },
+        },
+      },
+      limit: {
+        type: 'number',
+        description: 'Maximum number of action items to return (default: 50, max: 100)',
+        default: 50,
+      },
+    },
+  },
+};
+
 // Export all email schemas as an array for easy iteration
 export const emailSchemas = [
   listEmailsSchema,
@@ -486,6 +609,9 @@ export const emailSchemas = [
   categorizeEmailSchema,
   archiveEmailSchema,
   batchProcessEmailsSchema,
+  batchMoveEmailsSchema,
+  analyzeInboxSchema,
+  identifyActionItemsSchema,
 ];
 
 // Export mapping for quick lookup
@@ -505,4 +631,7 @@ export const emailSchemaMap = {
   'outlook_categorize_email': categorizeEmailSchema,
   'outlook_archive_email': archiveEmailSchema,
   'outlook_batch_process_emails': batchProcessEmailsSchema,
+  'outlook_batch_move_emails': batchMoveEmailsSchema,
+  'outlook_analyze_inbox': analyzeInboxSchema,
+  'outlook_identify_action_items': identifyActionItemsSchema,
 };
